@@ -9,6 +9,7 @@ import 'screens/panic_overlay_screen.dart';
 import 'theme_mode_scope.dart';
 import 'screens/app_permissions_screen.dart';
 import 'services/push_notification_service.dart';
+import 'services/revenuecat_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -19,6 +20,7 @@ void main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+  await RevenueCatService.initialize();
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
   runApp(const AegixaApp());
 }

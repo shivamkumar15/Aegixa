@@ -13,6 +13,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart' as latlng;
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
+import 'package:purchases_ui_flutter/purchases_ui_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -22,6 +23,7 @@ import '../services/emergency_contacts_service.dart';
 import '../services/sos_alert_service.dart';
 import '../services/sos_recording_service.dart';
 import '../services/username_service.dart';
+import '../services/revenuecat_service.dart';
 import '../theme_mode_scope.dart';
 import '../auth_gate.dart';
 import 'emergency_contact_editor_sheet.dart';
@@ -521,6 +523,40 @@ class _HomeScreenState extends State<HomeScreen> {
               holdDuration: _sosHoldDuration,
               onOpenBatteryOptimizationSettings: () {
                 return DeviceSettingsService.openBatteryOptimizationSettings();
+              },
+              onManageSubscription: () async {
+                try {
+                  final result = await RevenueCatService.presentPaywall();
+                  if (!context.mounted) {
+                    return;
+                  }
+                  final message = switch (result) {
+                    PaywallResult.purchased =>
+                      'Purchase complete. Your subscription is now active.',
+                    PaywallResult.restored =>
+                      'Purchases restored for this account.',
+                    PaywallResult.cancelled =>
+                      'Checkout closed. No changes were made.',
+                    PaywallResult.notPresented =>
+                      'No active paywall was found in RevenueCat.',
+                    PaywallResult.error =>
+                      'Unable to open checkout right now. Please try again.',
+                  };
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(message)),
+                  );
+                } catch (_) {
+                  if (!context.mounted) {
+                    return;
+                  }
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'Unable to open checkout right now. Please try again.',
+                      ),
+                    ),
+                  );
+                }
               },
               onAutoVideoRecordChanged: (value) {
                 setState(() => _autoVideoRecord = value);
@@ -3380,6 +3416,7 @@ class _SettingsTab extends StatelessWidget {
     required this.vibrationOnSos,
     required this.holdDuration,
     required this.onOpenBatteryOptimizationSettings,
+    required this.onManageSubscription,
     required this.onAutoVideoRecordChanged,
     required this.onAutoVoiceRecordChanged,
     required this.onVibrationOnSosChanged,
@@ -3396,10 +3433,28 @@ class _SettingsTab extends StatelessWidget {
   final bool vibrationOnSos;
   final int holdDuration;
   final Future<void> Function() onOpenBatteryOptimizationSettings;
+  final Future<void> Function() onManageSubscription;
   final ValueChanged<bool> onAutoVideoRecordChanged;
   final ValueChanged<bool> onAutoVoiceRecordChanged;
   final ValueChanged<bool> onVibrationOnSosChanged;
   final ValueChanged<int> onHoldDurationChanged;
+
+  static final Uri _termsUri = Uri.parse(
+    'https://protego-51833.web.app/terms',
+  );
+  static final Uri _privacyUri = Uri.parse(
+    'https://protego-51833.web.app/privacy',
+  );
+
+  Future<void> _openLegalPage(BuildContext context, Uri uri) async {
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (opened || !context.mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Could not open link right now.')),
+    );
+  }
 
   Future<void> _showAccountDetailsSheet(BuildContext context) async {
     final currentUser = user;
@@ -3619,6 +3674,15 @@ class _SettingsTab extends StatelessWidget {
               ),
               const SizedBox(height: 10),
               _SettingsTile(
+                assetIconPath: 'assets/profile.png',
+                title: 'Manage subscription',
+                subtitle: 'Open secure checkout to upgrade your plan.',
+                onTap: () async {
+                  await onManageSubscription();
+                },
+              ),
+              const SizedBox(height: 10),
+              _SettingsTile(
                 title: 'SOS inbox',
                 subtitle: '',
                 onTap: onOpenSosInbox,
@@ -3745,6 +3809,27 @@ class _SettingsTab extends StatelessWidget {
                 onSelectionChanged: (selection) {
                   onHoldDurationChanged(selection.first);
                 },
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        const _SettingsSectionHeader(title: 'Legal'),
+        _SurfaceCard(
+          child: Column(
+            children: [
+              _SettingsTile(
+                assetIconPath: 'assets/folder.png',
+                title: 'Terms of Service',
+                subtitle: '',
+                onTap: () => _openLegalPage(context, _termsUri),
+              ),
+              const SizedBox(height: 10),
+              _SettingsTile(
+                assetIconPath: 'assets/folder.png',
+                title: 'Privacy Policy',
+                subtitle: '',
+                onTap: () => _openLegalPage(context, _privacyUri),
               ),
             ],
           ),

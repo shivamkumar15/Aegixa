@@ -23,57 +23,27 @@
 - Supabase Database, Storage, and Edge Functions
 - Geolocator / Flutter Map
 
-## Setup
+## Who It Is For
 
-1. Clone the repository.
+- **Individuals who want personal safety support** during travel, commutes, late-night movement, or unfamiliar environments.
+- **Students and working professionals** who need a quick way to alert trusted contacts in an emergency.
+- **Families and close groups** who want a private, app-based emergency network with live updates.
+- **Anyone who prefers evidence-backed alerts** with audio/video capture attached to SOS sessions.
 
-```bash
-git clone https://github.com/shivamkumar15/Aegixa.git
-cd Aegixa
-```
+## How Aegixa Helps
 
-2. Install dependencies.
+- **One-touch emergency flow** with hold-to-activate safety to reduce accidental triggers.
+- **Real-time location updates** so emergency contacts can track where help is needed.
+- **Multi-channel panic delivery** using in-app alerts, full-screen panic UI, and push notifications.
+- **Emergency evidence collection** through voice and video recording during active SOS sessions.
+- **Recipient-first alert handling** with an SOS inbox, map links, and media download support.
 
-```bash
-flutter pub get
-```
+## Why It Stands Out
 
-3. Configure Firebase.
-
-- Create a Firebase project.
-- Add the Android app.
-- Download `google-services.json` into `android/app/`.
-- Update `lib/firebase_options.dart` if you are pointing to your own Firebase project.
-
-4. Configure Supabase.
-
-- Create a Supabase project.
-- Update the Supabase URL and anon key in `lib/main.dart`.
-- Run these SQL files in the Supabase SQL Editor:
-  - `supabase_public_profiles_schema.sql`
-  - `supabase_emergency_contacts_schema.sql`
-  - `supabase_usernames_schema.sql`
-  - `supabase_sos_alerts_schema.sql`
-  - `supabase_push_notifications_schema.sql`
-
-5. Configure SOS push delivery.
-
-- Create a Firebase service account JSON from Firebase Console.
-- Never commit or paste that JSON into the repo.
-- Set it as a Supabase Edge Function secret.
-
-```bash
-npx supabase@latest login
-npx supabase@latest link --project-ref ilwxanuvttrhxkgmaphq
-npx supabase@latest secrets set FIREBASE_SERVICE_ACCOUNT_JSON="$(cat "/path/to/service-account.json")"
-npx supabase@latest functions deploy send-sos-push --no-verify-jwt
-```
-
-6. Run the app.
-
-```bash
-flutter run
-```
+- **Built for speed under pressure** with a clear SOS-first interaction model.
+- **Works across background states** through Firebase Cloud Messaging and edge-powered push routing.
+- **Practical device support** with OEM battery guidance for Android brands that restrict background behavior.
+- **Optimized storage workflow** by letting recipients download media and then clean remote files.
 
 ## Important Notes
 
