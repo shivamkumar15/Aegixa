@@ -57,8 +57,15 @@ migrate_working_dir/
 .env.*
 secret.dart
 
+# Internal development scripts
+rewrite_ui.py
+run.sh
+
 # Supabase CLI temp state
 /supabase/.temp/
+
+# Firebase related
+.firebase/
 
 # Symbolication related
 app.*.symbols
