@@ -1,61 +1,92 @@
-# Aegixa
+# Aegixa — Guardian Safety App
 
-**Aegixa** is a Flutter-based personal safety app focused on fast SOS dispatch, live location sharing, emergency media capture, and in-app panic delivery.
+<p align="center">
+  <img src="assets/Logo.png" alt="Aegixa Logo" width="120" height="120">
+</p>
 
-## Features
+<p align="center">
+  <b>Empowering personal safety through rapid SOS dispatch, live tracking, and evidence-backed emergency response.</b>
+</p>
 
-- **SOS trigger flow** with hold-to-activate protection.
-- **Live location sharing** to emergency contacts through Supabase-backed SOS sessions.
-- **SOS inbox** so recipients can view incoming panic alerts, live map links, and saved media.
-- **Voice and video evidence capture** during an SOS session.
-- **Recipient media download** so received voice and video files can be saved locally and cleaned from remote storage afterward.
-- **Panic notifications** with full-screen alerts, overlay support, and emergency sound.
-- **FCM push delivery** for background and closed-app SOS notifications.
-- **Emergency contact onboarding** with username-based in-app delivery.
-- **Firebase Auth + Supabase** hybrid stack.
-- **OEM battery guidance** for brands that aggressively restrict background delivery.
+<p align="center">
+  <img src="https://img.shields.io/badge/Flutter-02569B?style=for-the-badge&logo=flutter&logoColor=white" alt="Flutter">
+  <img src="https://img.shields.io/badge/Dart-0175C2?style=for-the-badge&logo=dart&logoColor=white" alt="Dart">
+  <img src="https://img.shields.io/badge/Supabase-3ECF8E?style=for-the-badge&logo=supabase&logoColor=white" alt="Supabase">
+  <img src="https://img.shields.io/badge/Firebase-FFCA28?style=for-the-badge&logo=firebase&logoColor=black" alt="Firebase">
+</p>
 
-## Stack
+---
 
-- Flutter / Dart
-- Firebase Auth
-- Firebase Cloud Messaging
-- Supabase Database, Storage, and Edge Functions
-- Geolocator / Flutter Map
+## 🚀 Overview
 
-## Who It Is For
+**Aegixa** is a high-performance personal safety application built with Flutter. It focuses on critical, time-sensitive emergency flows, ensuring that help is just a single interaction away. By combining real-time location sharing with automated media evidence capture, Aegixa provides a comprehensive safety net for individuals in vulnerable situations.
 
-- **Individuals who want personal safety support** during travel, commutes, late-night movement, or unfamiliar environments.
-- **Students and working professionals** who need a quick way to alert trusted contacts in an emergency.
-- **Families and close groups** who want a private, app-based emergency network with live updates.
-- **Anyone who prefers evidence-backed alerts** with audio/video capture attached to SOS sessions.
+## ✨ Key Features
 
-## How Aegixa Helps
+### 🚨 Emergency Response
+- **One-Touch SOS:** Streamlined trigger flow with hold-to-activate protection to prevent accidental alerts.
+- **Panic Inbox:** A dedicated space for recipients to view incoming panic alerts, access live map links, and review saved media.
+- **Multi-Channel Delivery:** Uses FCM push notifications and full-screen panic UI to ensure alerts are noticed immediately.
 
-- **One-touch emergency flow** with hold-to-activate safety to reduce accidental triggers.
-- **Real-time location updates** so emergency contacts can track where help is needed.
-- **Multi-channel panic delivery** using in-app alerts, full-screen panic UI, and push notifications.
-- **Emergency evidence collection** through voice and video recording during active SOS sessions.
-- **Recipient-first alert handling** with an SOS inbox, map links, and media download support.
+### 📍 Real-Time Tracking
+- **Live Location Sharing:** Continuous location updates shared with emergency contacts via Supabase-backed SOS sessions.
+- **Interactive Map:** Integrated Flutter Map for recipients to track the sender's movement in real-time.
 
-## Why It Stands Out
+### 📁 Evidence Capture
+- **Media Recording:** Automatic voice and video capture during active SOS sessions.
+- **Optimized Storage:** Recipient-first media handling—recipients download files locally, followed by automated remote cleanup to maintain privacy and storage efficiency.
 
-- **Built for speed under pressure** with a clear SOS-first interaction model.
-- **Works across background states** through Firebase Cloud Messaging and edge-powered push routing.
-- **Practical device support** with OEM battery guidance for Android brands that restrict background behavior.
-- **Optimized storage workflow** by letting recipients download media and then clean remote files.
+### 🔋 Reliability & Compatibility
+- **Background Persistence:** Built for reliability across background states using Firebase Cloud Messaging.
+- **OEM Battery Guidance:** Specialized support and in-app instructions for Android brands (Xiaomi, Vivo, Oppo, etc.) that aggressively restrict background processes.
 
-## Important Notes
+## 🛠️ Technical Stack
 
-- Android devices from Xiaomi, Vivo, Oppo, Realme, Huawei, and similar OEMs may require battery optimization or autostart changes for reliable emergency alerts.
-- The app includes an onboarding warning, a battery optimization shortcut, and an OEM-specific guide screen to help users configure this.
-- SOS media is uploaded for recipients, then downloaded locally by recipients and cleaned up remotely to reduce Supabase storage usage.
+- **Frontend:** [Flutter](https://flutter.dev/) & [Dart](https://dart.dev/)
+- **Authentication:** [Firebase Auth](https://firebase.google.com/docs/auth)
+- **Database & Storage:** [Supabase](https://supabase.com/) (PostgreSQL + Storage)
+- **Push Notifications:** [Firebase Cloud Messaging (FCM)](https://firebase.google.com/docs/cloud-messaging)
+- **Edge Logic:** Supabase Edge Functions for notification routing.
+- **Mapping:** [Geolocator](https://pub.dev/packages/geolocator) & [Flutter Map](https://pub.dev/packages/flutter_map)
 
-## Project Structure
+## 📂 Project Structure
 
-- `lib/screens` UI screens including home, onboarding, SOS inbox, battery guide, and recordings.
-- `lib/services` services for SOS alerts, media handling, push notifications, and device settings.
-- `supabase/functions/send-sos-push` Edge Function used to send FCM push notifications.
-- `supabase_*.sql` database setup files.
+```bash
+lib/
+├── screens/    # UI for Home, Onboarding, SOS Inbox, Battery Guide, etc.
+├── services/   # Business logic for SOS alerts, Push, Media, and Auth.
+├── utils/      # Validators and helper functions.
+└── main.dart   # App entry point.
 
-Built for personal safety and rapid emergency response.
+supabase/
+└── functions/  # Edge Functions (e.g., send-sos-push).
+```
+
+## 🛡️ Getting Started
+
+### Prerequisites
+- Flutter SDK (latest stable)
+- Firebase Project setup
+- Supabase Project setup
+
+### Installation
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/shivamkumar15/Aegixa.git
+   ```
+2. Install dependencies:
+   ```bash
+   flutter pub get
+   ```
+3. Configure `firebase_options.dart` and Supabase credentials.
+4. Run the app:
+   ```bash
+   flutter run
+   ```
+
+---
+
+<p align="center">
+  Built with ❤️ for a safer world.
+</p>
+
