@@ -17,30 +17,30 @@
 
 ---
 
-## 🚀 Overview
+##Overview
 
 **Aegixa** is a high-performance personal safety application built with Flutter. It focuses on critical, time-sensitive emergency flows, ensuring that help is just a single interaction away. By combining real-time location sharing with automated media evidence capture, Aegixa provides a comprehensive safety net for individuals in vulnerable situations.
 
-## ✨ Key Features
+##  Key Features
 
-### 🚨 Emergency Response
+###  Emergency Response
 - **One-Touch SOS:** Streamlined trigger flow with hold-to-activate protection to prevent accidental alerts.
 - **Panic Inbox:** A dedicated space for recipients to view incoming panic alerts, access live map links, and review saved media.
 - **Multi-Channel Delivery:** Uses FCM push notifications and full-screen panic UI to ensure alerts are noticed immediately.
 
-### 📍 Real-Time Tracking
+###  Real-Time Tracking
 - **Live Location Sharing:** Continuous location updates shared with emergency contacts via Supabase-backed SOS sessions.
 - **Interactive Map:** Integrated Flutter Map for recipients to track the sender's movement in real-time.
 
-### 📁 Evidence Capture
+###  Evidence Capture
 - **Media Recording:** Automatic voice and video capture during active SOS sessions.
 - **Optimized Storage:** Recipient-first media handling—recipients download files locally, followed by automated remote cleanup to maintain privacy and storage efficiency.
 
-### 🔋 Reliability & Compatibility
+###  Reliability & Compatibility
 - **Background Persistence:** Built for reliability across background states using Firebase Cloud Messaging.
 - **OEM Battery Guidance:** Specialized support and in-app instructions for Android brands (Xiaomi, Vivo, Oppo, etc.) that aggressively restrict background processes.
 
-## 🛠️ Technical Stack
+##  Technical Stack
 
 - **Frontend:** [Flutter](https://flutter.dev/) & [Dart](https://dart.dev/)
 - **Authentication:** [Firebase Auth](https://firebase.google.com/docs/auth)
@@ -49,42 +49,6 @@
 - **Edge Logic:** Supabase Edge Functions for notification routing.
 - **Mapping:** [Geolocator](https://pub.dev/packages/geolocator) & [Flutter Map](https://pub.dev/packages/flutter_map)
 
-## 📂 Project Structure
-
-```bash
-lib/
-├── screens/    # UI for Home, Onboarding, SOS Inbox, Battery Guide, etc.
-├── services/   # Business logic for SOS alerts, Push, Media, and Auth.
-├── utils/      # Validators and helper functions.
-└── main.dart   # App entry point.
-
-supabase/
-└── functions/  # Edge Functions (e.g., send-sos-push).
-```
-
-## 🛡️ Getting Started
-
-### Prerequisites
-- Flutter SDK (latest stable)
-- Firebase Project setup
-- Supabase Project setup
-
-### Installation
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/shivamkumar15/Aegixa.git
-   ```
-2. Install dependencies:
-   ```bash
-   flutter pub get
-   ```
-3. Configure `firebase_options.dart` and Supabase credentials.
-4. Run the app:
-   ```bash
-   flutter run
-   ```
-
----
 
 <p align="center">
   Built with ❤️ for a safer world.
