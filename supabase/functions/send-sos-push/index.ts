@@ -8,12 +8,22 @@ type SosAlertPushPayload = {
   alertMessage: string
 }
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+const ALLOWED_ORIGINS = [
+  'https://ilwxanuvttrhxkgmaphq.supabase.co',
+]
+
+function getCorsHeaders(request: Request) {
+  const origin = request.headers.get('Origin') ?? ''
+  const allowedOrigin = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]
+  return {
+    'Access-Control-Allow-Origin': allowedOrigin,
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  }
 }
 
 Deno.serve(async (request) => {
+  const corsHeaders = getCorsHeaders(request)
+
   if (request.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
@@ -22,6 +32,7 @@ Deno.serve(async (request) => {
     console.log('send-sos-push request received')
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
     const supabaseServiceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
     const firebaseServiceAccountJson = Deno.env.get('FIREBASE_SERVICE_ACCOUNT_JSON') ?? ''
 
     if (!supabaseUrl || !supabaseServiceRoleKey || !firebaseServiceAccountJson) {
@@ -30,13 +41,30 @@ Deno.serve(async (request) => {
       )
     }
 
+    // --- AUTH: Verify the caller is an authenticated Supabase user ---
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return jsonResponse({ error: 'Missing or invalid Authorization header' }, 401, corsHeaders)
+    }
+    const userToken = authHeader.replace('Bearer ', '')
+    const userSupabase = createClient(supabaseUrl, supabaseAnonKey || supabaseServiceRoleKey, {
+      global: { headers: { Authorization: `Bearer ${userToken}` } },
+    })
+    const { data: { user }, error: authError } = await userSupabase.auth.getUser()
+    if (authError || !user) {
+      console.error('auth verification failed', authError)
+      return jsonResponse({ error: 'Unauthorized' }, 401, corsHeaders)
+    }
+    const callerUserId = user.id
+    console.log('authenticated caller', { callerUserId })
+
     const { alerts } = await request.json() as { alerts?: SosAlertPushPayload[] }
     const sanitizedAlerts = (alerts ?? []).filter(
       (alert) => alert && alert.recipientUserId && alert.senderName,
     )
     console.log('alerts received', { count: sanitizedAlerts.length })
     if (sanitizedAlerts.length === 0) {
-      return jsonResponse({ sentCount: 0, skippedCount: 0 })
+      return jsonResponse({ sentCount: 0, skippedCount: 0 }, 200, corsHeaders)
     }
 
     const supabase = createClient(supabaseUrl, supabaseServiceRoleKey)
@@ -155,21 +183,22 @@ Deno.serve(async (request) => {
     }
 
     console.log('send-sos-push completed', { sentCount, skippedCount })
-    return jsonResponse({ sentCount, skippedCount })
+    return jsonResponse({ sentCount, skippedCount }, 200, corsHeaders)
   } catch (error) {
     console.error('send-sos-push crashed', error)
     return jsonResponse(
       { error: error instanceof Error ? error.message : 'Unknown error' },
       500,
+      corsHeaders,
     )
   }
 })
 
-function jsonResponse(body: unknown, status = 200) {
+function jsonResponse(body: unknown, status = 200, headers: Record<string, string> = {}) {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
-      ...corsHeaders,
+      ...headers,
       'Content-Type': 'application/json',
     },
   })

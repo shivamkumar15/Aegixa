@@ -37,17 +37,39 @@ class _AuthGateState extends State<AuthGate> {
   /// **in parallel** instead of sequentially.  This cuts the visible loading
   /// time from 3 serial round-trips down to one parallel batch.
   Future<_RoutingDecision> _resolveRouting(String uid) async {
-    final results = await Future.wait([
-      UsernameService().getUsernameForUserId(uid),
-      _hasProfileDetails(uid),
-      EmergencyContactsService().shouldShowOnboarding(),
-    ]);
+    try {
+      final results = await Future.wait([
+        UsernameService().getUsernameForUserId(uid).timeout(
+          const Duration(seconds: 2),
+          onTimeout: () => null,
+        ),
+        _hasProfileDetails(uid).timeout(
+          const Duration(seconds: 2),
+          // Fail-closed: if we can't verify profile completeness, assume
+          // incomplete so the user is routed to setup instead of HomeScreen.
+          onTimeout: () => false,
+        ),
+        EmergencyContactsService().shouldShowOnboarding().timeout(
+          const Duration(seconds: 2),
+          // Fail-closed: if we can't check onboarding, assume it's needed
+          // so the user is routed to emergency contacts setup.
+          onTimeout: () => true,
+        ),
+      ]);
 
-    return _RoutingDecision(
-      username: results[0] as String?,
-      hasProfileDetails: results[1] as bool,
-      shouldShowOnboarding: results[2] as bool,
-    );
+      return _RoutingDecision(
+        username: results[0] as String?,
+        hasProfileDetails: results[1] as bool,
+        shouldShowOnboarding: results[2] as bool,
+      );
+    } catch (_) {
+      return const _RoutingDecision(
+        username: null,
+        hasProfileDetails: true,
+        shouldShowOnboarding: false,
+        networkUnavailable: true,
+      );
+    }
   }
 
   Future<bool> _hasProfileDetails(String uid) async {
@@ -92,8 +114,22 @@ class _AuthGateState extends State<AuthGate> {
         }
 
         final user = snapshot.data!;
+
+        // Determine session validity based on the *primary* sign-in method,
+        // not just any linked provider.  This prevents an attacker from
+        // bypassing email verification by linking a phone number they control.
+        final providers =
+            user.providerData.map((p) => p.providerId).toSet();
+        final hasEmailPasswordProvider = providers.contains('password');
+        final hasOAuthProvider = providers.contains('google.com') ||
+            providers.contains('apple.com');
+        // Phone-only accounts (no email/password provider) are allowed
+        // because the user proved possession via OTP.
+        final hasPhoneOnlyAuth =
+            providers.contains('phone') && !hasEmailPasswordProvider;
+
         final isAllowedSession =
-            user.phoneNumber != null || user.emailVerified;
+            hasOAuthProvider || hasPhoneOnlyAuth || user.emailVerified;
 
         if (!isAllowedSession) {
           return const VerifyEmailScreen();
@@ -115,6 +151,52 @@ class _AuthGateState extends State<AuthGate> {
 
             final hasUsername =
                 (decision.username ?? '').trim().isNotEmpty;
+
+            if (decision.networkUnavailable) {
+              // When offline, only allow access to HomeScreen if the user
+              // has previously completed setup (username cached locally).
+              // Otherwise force them to retry when connectivity returns.
+              if (hasUsername) {
+                return const HomeScreen(showOfflineBanner: true);
+              }
+              // No cached username and no network — show a retry screen
+              // instead of granting access without profile completion.
+              return Scaffold(
+                body: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(32),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.cloud_off, size: 64),
+                        const SizedBox(height: 16),
+                        const Text(
+                          'No internet connection',
+                          style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'Please connect to the internet to complete your profile setup.',
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 24),
+                        ElevatedButton(
+                          onPressed: () {
+                            setState(() {
+                              _cachedUid = null;
+                              _cachedRoutingFuture = null;
+                            });
+                          },
+                          child: const Text('Retry'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }
 
             if (!hasUsername || !decision.hasProfileDetails) {
               return UsernameSetupScreen(
@@ -151,9 +233,11 @@ class _RoutingDecision {
     required this.username,
     required this.hasProfileDetails,
     required this.shouldShowOnboarding,
+    this.networkUnavailable = false,
   });
 
   final String? username;
   final bool hasProfileDetails;
   final bool shouldShowOnboarding;
+  final bool networkUnavailable;
 }

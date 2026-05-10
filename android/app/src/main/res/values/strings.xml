@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="sos_shortcut_accessibility_description">Allows Aegixa to detect volume-down triple press and trigger SOS in background.</string>
+</resources>

@@ -13,14 +13,16 @@ create unique index if not exists usernames_username_unique_idx
 
 alter table public.usernames enable row level security;
 
+-- RLS: anyone authenticated can look up usernames (needed for search)
 drop policy if exists usernames_select on public.usernames;
 create policy usernames_select
   on public.usernames
   for select
   using (true);
 
+-- RLS: users can only claim a username for their own uid
 drop policy if exists usernames_insert on public.usernames;
 create policy usernames_insert
   on public.usernames
   for insert
-  with check (true);
+  with check (auth.uid()::text = uid);

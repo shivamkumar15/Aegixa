@@ -1,4 +1,5 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -75,6 +76,7 @@ class EmergencyContactsService {
 
   static const _table = 'emergency_contacts';
   static const _skipKeyPrefix = 'emergency_contacts_setup_skipped_';
+  static const _cacheKeyPrefix = 'emergency_contacts_cache_';
   final SupabaseClient _supabase = Supabase.instance.client;
 
   String get _currentUserId {
@@ -86,30 +88,39 @@ class EmergencyContactsService {
   }
 
   Future<List<EmergencyContact>> getContacts() async {
+    final userId = _currentUserId;
     try {
       final rows = await _supabase
           .from(_table)
           .select()
-          .eq('user_id', _currentUserId)
+          .eq('user_id', userId)
           .order('is_primary', ascending: false)
           .order('id', ascending: true);
 
-      return rows
+      final contacts = rows
           .whereType<Map<String, dynamic>>()
           .map(EmergencyContact.fromMap)
           .toList();
+      await _saveContactsCache(userId, contacts);
+      return contacts;
     } catch (_) {
-      final rows = await _supabase
-          .from(_table)
-          .select()
-          .eq('user_id', _currentUserId)
-          .order('is_primary', ascending: false)
-          .order('name', ascending: true);
+      try {
+        final rows = await _supabase
+            .from(_table)
+            .select()
+            .eq('user_id', userId)
+            .order('is_primary', ascending: false)
+            .order('name', ascending: true);
 
-      return rows
-          .whereType<Map<String, dynamic>>()
-          .map(EmergencyContact.fromMap)
-          .toList();
+        final contacts = rows
+            .whereType<Map<String, dynamic>>()
+            .map(EmergencyContact.fromMap)
+            .toList();
+        await _saveContactsCache(userId, contacts);
+        return contacts;
+      } catch (_) {
+        return _loadContactsCache(userId);
+      }
     }
   }
 
@@ -145,15 +156,18 @@ class EmergencyContactsService {
       throw StateError('Emergency contacts save failed: ${e.message}');
     }
 
+    await _refreshContactsCache(userId);
     await markOnboardingSkipped(false);
   }
 
   Future<void> deleteContact(int id) async {
+    final userId = _currentUserId;
     await _supabase
         .from(_table)
         .delete()
         .eq('id', id)
-        .eq('user_id', _currentUserId);
+        .eq('user_id', userId);
+    await _refreshContactsCache(userId);
   }
 
   Future<bool> shouldShowOnboarding() async {
@@ -167,5 +181,52 @@ class EmergencyContactsService {
   Future<void> markOnboardingSkipped(bool skipped) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('$_skipKeyPrefix$_currentUserId', skipped);
+  }
+
+  Future<void> _refreshContactsCache(String userId) async {
+    try {
+      final rows = await _supabase
+          .from(_table)
+          .select()
+          .eq('user_id', userId)
+          .order('is_primary', ascending: false)
+          .order('id', ascending: true);
+      final contacts = rows
+          .whereType<Map<String, dynamic>>()
+          .map(EmergencyContact.fromMap)
+          .toList();
+      await _saveContactsCache(userId, contacts);
+    } catch (_) {
+      // Ignore cache refresh failures when network is unavailable.
+    }
+  }
+
+  Future<void> _saveContactsCache(
+    String userId,
+    List<EmergencyContact> contacts,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    final payload = contacts.map((contact) => contact.toMap()).toList();
+    await prefs.setString('$_cacheKeyPrefix$userId', jsonEncode(payload));
+  }
+
+  Future<List<EmergencyContact>> _loadContactsCache(String userId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString('$_cacheKeyPrefix$userId');
+    if (raw == null || raw.trim().isEmpty) {
+      return const [];
+    }
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) {
+        return const [];
+      }
+      return decoded
+          .whereType<Map<String, dynamic>>()
+          .map(EmergencyContact.fromMap)
+          .toList();
+    } catch (_) {
+      return const [];
+    }
   }
 }

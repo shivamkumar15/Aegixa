@@ -88,7 +88,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
       await _authService.signUpWithEmail(
         email: _emailController.text.trim(),
         password: _passwordController.text,
-        fullName: '',
+        fullName: _emailController.text.trim().split('@').first,
       );
       if (!mounted) {
         return;
@@ -102,7 +102,9 @@ class _SignUpScreenState extends State<SignUpScreen> {
       );
     } on FirebaseAuthException catch (e) {
       if (e.code == 'email-already-in-use') {
-        _showError('That email is already registered. Please log in.');
+        // Use generic message to prevent email enumeration — don't confirm
+        // whether the email is registered or not.
+        _showError('Could not create account. Try logging in instead.');
       } else if (e.code == 'weak-password') {
         _showError('Use a stronger password to continue.');
       } else if (e.code == 'too-many-requests') {
@@ -201,18 +203,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
                       ),
                     ),
                     const SizedBox(height: 6),
-                    Center(
-                      child: Text(
-                        'Sign up first, then we will ask your username and profile details.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: isDark
-                              ? const Color(0xFFA3A3A3)
-                              : const Color(0xFF6B7280),
-                        ),
-                      ),
-                    ),
                     const SizedBox(height: 26),
                     buildTextField(
                       context: context,
@@ -288,6 +278,10 @@ class _SignUpScreenState extends State<SignUpScreen> {
                         _PasswordRuleChip(
                           label: '8+ characters',
                           isMet: passwordRules.minLength,
+                        ),
+                        _PasswordRuleChip(
+                          label: 'Max 128 characters',
+                          isMet: passwordRules.maxLength,
                         ),
                         _PasswordRuleChip(
                           label: 'Uppercase letter',

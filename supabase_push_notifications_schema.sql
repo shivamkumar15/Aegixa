@@ -32,33 +32,39 @@ execute function public.touch_push_notification_tokens_updated_at();
 
 alter table public.push_notification_tokens enable row level security;
 
+-- RLS: users can only read their own tokens
 drop policy if exists push_notification_tokens_select on public.push_notification_tokens;
 create policy push_notification_tokens_select
 on public.push_notification_tokens
 for select
-using (true);
+using (auth.uid()::text = user_id);
 
+-- RLS: users can only insert tokens for themselves
 drop policy if exists push_notification_tokens_insert on public.push_notification_tokens;
 create policy push_notification_tokens_insert
 on public.push_notification_tokens
 for insert
 with check (
-  coalesce(length(trim(user_id)), 0) > 0
+  auth.uid()::text = user_id
+  and coalesce(length(trim(user_id)), 0) > 0
   and coalesce(length(trim(fcm_token)), 0) > 0
 );
 
+-- RLS: users can only update their own tokens
 drop policy if exists push_notification_tokens_update on public.push_notification_tokens;
 create policy push_notification_tokens_update
 on public.push_notification_tokens
 for update
-using (true)
+using (auth.uid()::text = user_id)
 with check (
-  coalesce(length(trim(user_id)), 0) > 0
+  auth.uid()::text = user_id
+  and coalesce(length(trim(user_id)), 0) > 0
   and coalesce(length(trim(fcm_token)), 0) > 0
 );
 
+-- RLS: users can only delete their own tokens
 drop policy if exists push_notification_tokens_delete on public.push_notification_tokens;
 create policy push_notification_tokens_delete
 on public.push_notification_tokens
 for delete
-using (true);
+using (auth.uid()::text = user_id);

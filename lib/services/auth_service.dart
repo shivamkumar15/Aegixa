@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 import 'package:crypto/crypto.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:supabase_flutter/supabase_flutter.dart'
@@ -207,16 +208,32 @@ class AuthService {
 
   // ── Sign Out ─────────────────────────────────────────────────
   Future<void> signOut() async {
+    // Sign out from all providers. If any provider fails, continue with
+    // the remaining sign-outs but track the failure so the caller knows
+    // the session may not be fully invalidated.
+    String? signOutError;
+
     await _auth.signOut();
+
     try {
       await GoogleSignIn().signOut();
     } catch (_) {
-      // Ignore Google sign out failures.
+      // Google sign out failure is non-critical (no persistent session).
     }
+
     try {
       await Supabase.instance.client.auth.signOut();
-    } catch (_) {
-      // Ignore Supabase sign out failures.
+    } catch (e) {
+      // Supabase sign-out failure is security-relevant: the Supabase JWT
+      // may remain valid for its remaining TTL. Log and propagate.
+      signOutError = 'Supabase session may still be active: $e';
+      debugPrint('Supabase sign-out failed — JWT may persist: $e');
+    }
+
+    if (signOutError != null) {
+      throw StateError(
+        'Sign-out partially failed. Please close the app and try again.',
+      );
     }
   }
 

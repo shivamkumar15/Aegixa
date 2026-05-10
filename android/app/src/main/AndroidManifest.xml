@@ -8,6 +8,12 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <application
         android:label="Aegixa"
         android:name="${applicationName}"
@@ -42,6 +48,27 @@
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
             android:value="panic_sos_alerts" />
+
+        <service
+            android:name=".SosShortcutAccessibilityService"
+            android:exported="false"
+            android:label="Aegixa SOS Shortcut"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/sos_shortcut_accessibility_service" />
+        </service>
+
+        <service
+            android:name=".SosForegroundService"
+            android:enabled="true"
+            android:exported="false"
+            android:process=":sos"
+            android:foregroundServiceType="location|microphone|camera"
+            android:stopWithTask="false" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

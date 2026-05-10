@@ -92,27 +92,34 @@ execute function public.touch_emergency_contacts_updated_at();
 
 alter table public.emergency_contacts enable row level security;
 
+-- RLS: users can only read their own emergency contacts
 drop policy if exists emergency_contacts_select on public.emergency_contacts;
 create policy emergency_contacts_select
 on public.emergency_contacts
 for select
-using (true);
+using (auth.uid()::text = user_id);
 
+-- RLS: users can only insert contacts for themselves
 drop policy if exists emergency_contacts_insert on public.emergency_contacts;
 create policy emergency_contacts_insert
 on public.emergency_contacts
 for insert
-with check (coalesce(length(trim(user_id)), 0) > 0);
+with check (
+  auth.uid()::text = user_id
+  and coalesce(length(trim(user_id)), 0) > 0
+);
 
+-- RLS: users can only update their own contacts
 drop policy if exists emergency_contacts_update on public.emergency_contacts;
 create policy emergency_contacts_update
 on public.emergency_contacts
 for update
-using (true)
-with check (coalesce(length(trim(user_id)), 0) > 0);
+using (auth.uid()::text = user_id)
+with check (auth.uid()::text = user_id);
 
+-- RLS: users can only delete their own contacts
 drop policy if exists emergency_contacts_delete on public.emergency_contacts;
 create policy emergency_contacts_delete
 on public.emergency_contacts
 for delete
-using (true);
+using (auth.uid()::text = user_id);

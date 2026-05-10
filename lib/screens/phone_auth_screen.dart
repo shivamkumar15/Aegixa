@@ -2,6 +2,7 @@ import 'package:country_picker/country_picker.dart';
 import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
 import '../ui_components.dart';
+import '../utils/auth_validators.dart';
 
 class PhoneAuthScreen extends StatefulWidget {
   const PhoneAuthScreen({super.key});
@@ -16,6 +17,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
   bool _isLoading = false;
   bool _codeSent = false;
   String? _verificationId;
+  DateTime? _lastOtpSentAt;
 
   Country _selectedCountry = Country(
     phoneCode: "91",
@@ -38,6 +40,22 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
 
   Future<void> _sendOTP() async {
     if (_phoneController.text.isEmpty) return;
+    // Validate phone number format before sending
+    final phoneError =
+        AuthValidators.validatePhoneNumber(_phoneController.text.trim());
+    if (phoneError != null) {
+      _showError(phoneError);
+      return;
+    }
+    // Rate limit: 60 seconds between OTP requests
+    final now = DateTime.now();
+    if (_lastOtpSentAt != null &&
+        now.difference(_lastOtpSentAt!).inSeconds < 60) {
+      final remaining = 60 - now.difference(_lastOtpSentAt!).inSeconds;
+      _showError('Please wait $remaining seconds before requesting another code.');
+      return;
+    }
+    _lastOtpSentAt = now;
     setState(() => _isLoading = true);
     await _authService.signInWithPhone(
       phoneNumber:

@@ -100,7 +100,8 @@ class PushNotificationService {
         'last_seen_at': DateTime.now().toIso8601String(),
       }, onConflict: 'fcm_token');
     } catch (error) {
-      debugPrint('FCM token sync failed: $error');
+      // Log only a generic message to avoid leaking sensitive error details
+      debugPrint('FCM token sync failed');
     }
   }
 

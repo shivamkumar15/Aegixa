@@ -22,6 +22,7 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _obscurePassword = true;
   bool _isLoading = false;
   String? _loadingProvider;
+  DateTime? _lastPasswordResetAt;
 
   @override
   void dispose() {
@@ -51,8 +52,9 @@ class _LoginScreenState extends State<LoginScreen> {
       }
     } on FirebaseAuthException catch (e) {
       if (e.code == 'email-not-verified') {
-        _showError(
-            'Please verify your email first to login to the app. Check inbox/spam.');
+        // Use generic message to prevent email enumeration — don't reveal
+        // that the account exists but is unverified.
+        _showError('Invalid email or password.');
       } else {
         _showError('Invalid email or password.');
       }
@@ -156,14 +158,6 @@ class _LoginScreenState extends State<LoginScreen> {
                               letterSpacing: -1)),
                     ),
                     const SizedBox(height: 6),
-                    Center(
-                      child: Text('Sign in to your account to continue',
-                          style: TextStyle(
-                              fontSize: 15,
-                              color: isDark
-                                  ? const Color(0xFFA3A3A3)
-                                  : const Color(0xFF6B7280))),
-                    ),
                     const SizedBox(height: 28),
                     buildTextField(
                       context: context,
@@ -202,15 +196,30 @@ class _LoginScreenState extends State<LoginScreen> {
                       alignment: Alignment.centerRight,
                       child: TextButton(
                         onPressed: () {
-                          if (_emailController.text.isNotEmpty) {
-                            _authService
-                                .sendPasswordResetEmail(_emailController.text);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                    content: Text('Reset link sent')));
-                          } else {
+                          final email = _emailController.text.trim();
+                          if (email.isEmpty) {
                             _showError('Enter your email first');
+                            return;
                           }
+                          // Validate email format before sending
+                          final emailError = AuthValidators.validateEmail(email);
+                          if (emailError != null) {
+                            _showError(emailError);
+                            return;
+                          }
+                          // Rate limit: 60 seconds between reset requests
+                          final now = DateTime.now();
+                          if (_lastPasswordResetAt != null &&
+                              now.difference(_lastPasswordResetAt!).inSeconds < 60) {
+                            final remaining = 60 - now.difference(_lastPasswordResetAt!).inSeconds;
+                            _showError('Please wait $remaining seconds before requesting another reset.');
+                            return;
+                          }
+                          _lastPasswordResetAt = now;
+                          _authService.sendPasswordResetEmail(email);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                  content: Text('If that email is registered, a reset link has been sent.')));
                         },
                         child: const Text('Forgot password?',
                             style: TextStyle(fontWeight: FontWeight.w600)),

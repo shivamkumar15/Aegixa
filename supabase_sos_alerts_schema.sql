@@ -58,57 +58,91 @@ execute function public.touch_sos_alerts_updated_at();
 
 alter table public.sos_alerts enable row level security;
 
+-- RLS: only the sender or recipient can read their own alerts
 drop policy if exists sos_alerts_select on public.sos_alerts;
 create policy sos_alerts_select
 on public.sos_alerts
 for select
-using (true);
+using (
+  auth.uid()::text = sender_user_id
+  or auth.uid()::text = recipient_user_id
+);
 
+-- RLS: only authenticated user can insert, and sender_user_id must match their uid
 drop policy if exists sos_alerts_insert on public.sos_alerts;
 create policy sos_alerts_insert
 on public.sos_alerts
 for insert
-with check (coalesce(length(trim(sender_user_id)), 0) > 0);
+with check (
+  auth.uid()::text = sender_user_id
+  and coalesce(length(trim(sender_user_id)), 0) > 0
+);
 
+-- RLS: only the sender can update their own alerts (e.g. resolve, add recordings)
 drop policy if exists sos_alerts_update on public.sos_alerts;
 create policy sos_alerts_update
 on public.sos_alerts
 for update
-using (true)
-with check (coalesce(length(trim(sender_user_id)), 0) > 0);
+using (auth.uid()::text = sender_user_id)
+with check (auth.uid()::text = sender_user_id);
 
+-- RLS: only the sender can delete their own alerts
 drop policy if exists sos_alerts_delete on public.sos_alerts;
 create policy sos_alerts_delete
 on public.sos_alerts
 for delete
-using (true);
+using (auth.uid()::text = sender_user_id);
 
+-- Storage bucket: private (not public) - use signed URLs for access
 insert into storage.buckets (id, name, public)
-values ('sos-alert-recordings', 'sos-alert-recordings', true)
+values ('sos-alert-recordings', 'sos-alert-recordings', false)
 on conflict (id) do update
-set public = excluded.public;
+set public = false;
 
+-- Storage RLS: only the owner can read recordings in their own folder
+-- Files are stored at: {sender_user_id}/{session_id}/filename
 drop policy if exists sos_alert_recordings_public_read on storage.objects;
-create policy sos_alert_recordings_public_read
+drop policy if exists sos_alert_recordings_read on storage.objects;
+create policy sos_alert_recordings_read
 on storage.objects
 for select
-using (bucket_id = 'sos-alert-recordings');
+using (
+  bucket_id = 'sos-alert-recordings'
+  and auth.role() = 'authenticated'
+  and (storage.foldername(name))[1] = auth.uid()::text
+);
 
+-- Storage RLS: only authenticated users can upload to their own folder
 drop policy if exists sos_alert_recordings_upload on storage.objects;
 create policy sos_alert_recordings_upload
 on storage.objects
 for insert
 with check (
   bucket_id = 'sos-alert-recordings'
+  and auth.role() = 'authenticated'
+  and (storage.foldername(name))[1] = auth.uid()::text
 );
 
+-- Storage RLS: only the owner can update their own recordings
 drop policy if exists sos_alert_recordings_update on storage.objects;
 create policy sos_alert_recordings_update
 on storage.objects
 for update
 using (
   bucket_id = 'sos-alert-recordings'
+  and (storage.foldername(name))[1] = auth.uid()::text
 )
 with check (
   bucket_id = 'sos-alert-recordings'
+  and (storage.foldername(name))[1] = auth.uid()::text
+);
+
+-- Storage RLS: only the owner can delete their own recordings
+drop policy if exists sos_alert_recordings_delete on storage.objects;
+create policy sos_alert_recordings_delete
+on storage.objects
+for delete
+using (
+  bucket_id = 'sos-alert-recordings'
+  and (storage.foldername(name))[1] = auth.uid()::text
 );

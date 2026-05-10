@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
@@ -145,6 +146,34 @@ class SosAlertService {
   final SupabaseClient _supabase = Supabase.instance.client;
   final UsernameService _usernameService = UsernameService();
 
+  /// SOS rate limiting: minimum cooldown between alert sessions.
+  static const Duration _sosCooldown = Duration(seconds: 30);
+  DateTime? _lastSosTriggeredAt;
+
+  /// Maximum length for user-controlled text fields to prevent abuse.
+  static const int _maxAlertMessageLength = 500;
+  static const int _maxNameLength = 100;
+
+  /// Generate a cryptographically random session ID to prevent guessing.
+  String _generateSessionId(String userId) {
+    final random = Random.secure();
+    final bytes = List<int>.generate(16, (_) => random.nextInt(256));
+    final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+    return '${userId}_$hex';
+  }
+
+  /// Sanitize user-controlled text: trim, truncate, remove control characters.
+  String _sanitizeText(String input, int maxLength) {
+    // Remove control characters (except newline/tab for messages)
+    final cleaned = input
+        .replaceAll(RegExp(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]'), '')
+        .trim();
+    if (cleaned.length > maxLength) {
+      return cleaned.substring(0, maxLength);
+    }
+    return cleaned;
+  }
+
   String get _currentUserId {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
@@ -159,12 +188,29 @@ class SosAlertService {
     required String alertMessage,
   }) async {
     try {
+      // Rate limiting: prevent SOS flooding
+      final now = DateTime.now();
+      if (_lastSosTriggeredAt != null &&
+          now.difference(_lastSosTriggeredAt!) < _sosCooldown) {
+        final remaining =
+            _sosCooldown.inSeconds - now.difference(_lastSosTriggeredAt!).inSeconds;
+        throw StateError(
+          'Please wait $remaining seconds before sending another SOS alert.',
+        );
+      }
+
       final currentUserId = _currentUserId;
       final senderProfile =
           await _usernameService.getPublicProfileForUserId(currentUserId);
-      final senderName = _resolveSenderName(senderProfile);
-      final sessionId =
-          '${currentUserId}_${DateTime.now().millisecondsSinceEpoch}';
+      final senderName = _sanitizeText(
+        _resolveSenderName(senderProfile),
+        _maxNameLength,
+      );
+      // Use cryptographically random session ID instead of predictable timestamp
+      final sessionId = _generateSessionId(currentUserId);
+
+      // Sanitize alert message
+      final sanitizedMessage = _sanitizeText(alertMessage, _maxAlertMessageLength);
 
       final usernames = contacts
           .map((contact) => (contact.username ?? '').trim())
@@ -216,10 +262,10 @@ class SosAlertService {
           'sender_photo_path': senderProfile?.profilePhotoPath,
           'recipient_user_id': recipientUserId,
           'recipient_username': username,
-          'contact_name': contact.name,
-          'contact_phone_number': contact.phoneNumber,
+          'contact_name': _sanitizeText(contact.name, _maxNameLength),
+          'contact_phone_number': _sanitizeText(contact.phoneNumber, 20),
           'is_primary': contact.isPrimary,
-          'alert_message': alertMessage,
+          'alert_message': sanitizedMessage,
           'latitude': position.latitude,
           'longitude': position.longitude,
           'location_accuracy_meters': position.accuracy,
@@ -242,6 +288,9 @@ class SosAlertService {
           .select('id,session_id,recipient_user_id,sender_name,alert_message');
 
       final pushSummary = await _dispatchPushAlerts(insertedRows);
+
+      // Mark rate limit timestamp only after successful dispatch
+      _lastSosTriggeredAt = DateTime.now();
 
       return SosAlertDispatchSummary(
         sessionId: sessionId,
@@ -524,7 +573,17 @@ class SosAlertService {
       throw StateError(fileMissingMessage);
     }
 
-    final response = await http.get(Uri.parse(normalizedUrl));
+    // SECURITY: Validate the URL to prevent SSRF attacks.
+    // Only allow HTTPS URLs from our own Supabase storage domain.
+    final uri = Uri.tryParse(normalizedUrl);
+    if (uri == null ||
+        !uri.hasScheme ||
+        uri.scheme != 'https' ||
+        !uri.host.endsWith('.supabase.co')) {
+      throw StateError('Invalid or untrusted media URL');
+    }
+
+    final response = await http.get(uri);
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw StateError(downloadFailureMessage);
     }
@@ -642,36 +701,34 @@ class SosAlertService {
   }
 
   String _friendlySupabaseError(PostgrestException error) {
-    final message = error.message.trim();
-    final lower = message.toLowerCase();
+    // Log the raw error for debugging but never expose it to the user.
+    debugPrint('Supabase SOS error: ${error.code}');
+    final lower = error.message.trim().toLowerCase();
     if (lower.contains('could not find the table') &&
         lower.contains('sos_alerts')) {
-      return 'Supabase SOS setup is incomplete. Run `supabase_sos_alerts_schema.sql` to create the `sos_alerts` table.';
+      return 'SOS service is not configured. Please contact support.';
     }
     if (lower.contains('video_recording_url') ||
         lower.contains('voice_recording_url')) {
-      return 'Supabase SOS media columns are missing. Re-run `supabase_sos_alerts_schema.sql`.';
+      return 'SOS media storage is not configured. Please contact support.';
     }
     if (lower.contains('row-level security') ||
         lower.contains('permission denied') ||
         lower.contains('violates row-level security')) {
-      return 'Supabase SOS permissions are blocking this action. Re-run `supabase_sos_alerts_schema.sql`.';
+      return 'You do not have permission to perform this action.';
     }
-    if (message.isNotEmpty) {
-      return message;
-    }
-    return 'Supabase SOS request failed.';
+    // Never forward raw database error messages to the user —
+    // they may leak table names, column names, or query internals.
+    return 'SOS request failed. Please try again.';
   }
 
   String _friendlyStorageError(StorageException error) {
-    final message = error.message.trim();
-    final lower = message.toLowerCase();
+    debugPrint('Supabase storage error: ${error.statusCode}');
+    final lower = error.message.trim().toLowerCase();
     if (lower.contains('bucket')) {
-      return 'Supabase SOS recording storage is not set up. Re-run `supabase_sos_alerts_schema.sql`.';
+      return 'SOS recording storage is not configured. Please contact support.';
     }
-    if (message.isNotEmpty) {
-      return message;
-    }
-    return 'Could not upload the SOS voice recording.';
+    // Never forward raw storage error messages to the user.
+    return 'Could not upload the SOS recording. Please try again.';
   }
 }

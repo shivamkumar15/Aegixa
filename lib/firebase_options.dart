@@ -50,9 +50,11 @@ class DefaultFirebaseOptions {
 
   // iOS: Add your iOS app to Firebase Console and fill these in,
   // or run `flutterfire configure` to auto-generate.
+  // TODO: Replace with actual iOS appId from Firebase Console.
+  // The current value is the Android appId (copy-paste bug).
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: 'AIzaSyDrIrPX0-FjRO_kdYPffUA3wxLVlgsW9C8',
-    appId: '1:820900289964:android:ed76023b42f80eec406e09',
+    appId: '1:820900289964:ios:REPLACE_WITH_IOS_APP_ID',
     messagingSenderId: '820900289964',
     projectId: 'protego-51833',
     storageBucket: 'protego-51833.firebasestorage.app',

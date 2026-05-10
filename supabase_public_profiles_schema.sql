@@ -36,27 +36,36 @@ execute function public.touch_public_profiles_updated_at();
 
 alter table public.public_profiles enable row level security;
 
+-- RLS: only authenticated users can read public profiles.
+-- NOTE: phone_number and date_of_birth are sensitive PII.
+-- Application queries should only select (uid, username, display_name, photo_path)
+-- for other users. The full profile should only be fetched for the current user.
+-- Consider moving phone_number and date_of_birth to a separate private_profiles
+-- table with strict owner-only RLS if stronger isolation is needed.
 drop policy if exists public_profiles_select on public.public_profiles;
 create policy public_profiles_select
 on public.public_profiles
 for select
-using (true);
+using (auth.role() = 'authenticated');
 
+-- RLS: users can only insert their own profile
 drop policy if exists public_profiles_insert on public.public_profiles;
 create policy public_profiles_insert
 on public.public_profiles
 for insert
-with check (coalesce(length(trim(uid)), 0) > 0);
+with check (auth.uid()::text = uid);
 
+-- RLS: users can only update their own profile
 drop policy if exists public_profiles_update on public.public_profiles;
 create policy public_profiles_update
 on public.public_profiles
 for update
-using (true)
-with check (coalesce(length(trim(uid)), 0) > 0);
+using (auth.uid()::text = uid)
+with check (auth.uid()::text = uid);
 
+-- RLS: users can only delete their own profile
 drop policy if exists public_profiles_delete on public.public_profiles;
 create policy public_profiles_delete
 on public.public_profiles
 for delete
-using (true);
+using (auth.uid()::text = uid);

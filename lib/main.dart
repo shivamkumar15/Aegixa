@@ -10,18 +10,52 @@ import 'theme_mode_scope.dart';
 import 'screens/app_permissions_screen.dart';
 import 'services/push_notification_service.dart';
 import 'services/revenuecat_service.dart';
+import 'services/supabase_auth_bridge.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Supabase.initialize(
-    url: 'https://ilwxanuvttrhxkgmaphq.supabase.co',
-    anonKey: 'sb_publishable_NL5o0d8iVuxi3yUXcZJ6rQ_mOvr9JqQ',
-  );
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
-  await RevenueCatService.initialize();
-  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
+  try {
+    const supabaseUrl = String.fromEnvironment(
+      'SUPABASE_URL',
+      defaultValue: 'https://ilwxanuvttrhxkgmaphq.supabase.co',
+    );
+    const supabaseAnonKey = String.fromEnvironment(
+      'SUPABASE_ANON_KEY',
+      defaultValue: 'sb_publishable_NL5o0d8iVuxi3yUXcZJ6rQ_mOvr9JqQ',
+    );
+
+    await Supabase.initialize(
+      url: supabaseUrl,
+      anonKey: supabaseAnonKey,
+    );
+  } catch (e) {
+    debugPrint('Supabase initialization failed: $e');
+  }
+
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+  } catch (e) {
+    debugPrint('Firebase initialization failed: $e');
+  }
+
+  try {
+    await RevenueCatService.initialize();
+  } catch (e) {
+    debugPrint('RevenueCat initialization failed: $e');
+  }
+
+  if (Firebase.apps.isNotEmpty) {
+    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
+    // Bridge Firebase Auth into Supabase so that RLS policies using
+    // auth.uid() receive the Firebase UID.  This must start after both
+    // Supabase and Firebase are initialised.
+    SupabaseAuthBridge().initialize();
+  }
+
   runApp(const AegixaApp());
 }
 

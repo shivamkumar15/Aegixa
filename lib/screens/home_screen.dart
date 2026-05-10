@@ -32,19 +32,28 @@ import 'sos_alerts_screen.dart';
 import 'sos_recordings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key, this.initialIndex = 0});
+  const HomeScreen({
+    super.key,
+    this.initialIndex = 0,
+    this.showOfflineBanner = false,
+  });
 
   final int initialIndex;
+  final bool showOfflineBanner;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   static const _autoVideoRecordKey = 'sos_auto_video_record';
   static const _autoVoiceRecordKey = 'sos_auto_voice_record';
   static const _sosHoldDurationKey = 'sos_hold_duration';
   static const _vibrationOnSosKey = 'sos_vibration_on_trigger';
+  static const _hardwareSosShortcutKey = 'hardware_sos_shortcut_enabled';
+  static const _activeSosSessionKey = 'active_sos_session_id';
+  static const MethodChannel _hardwareSosChannel =
+      MethodChannel('aegixa/hardware_sos');
 
   late int _currentIndex;
   final SosRecordingService _sosRecordingService = SosRecordingService();
@@ -56,12 +65,17 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _autoVideoRecord = false;
   bool _autoVoiceRecord = true;
   bool _vibrationOnSos = true;
+  bool _hardwareSosShortcutEnabled = true;
+  bool _isHardwareSosPermissionEnabled = false;
+  bool _isStoppingSos = false;
   int _sosHoldDuration = 2;
   String? _navProfilePhotoPath;
   DateTime? _lastBackPressedAt;
   StreamSubscription<Position>? _sosLocationSubscription;
   Position? _lastSharedSosPosition;
   DateTime? _lastSharedSosAt;
+  Timer? _offlineBannerProbeTimer;
+  bool _showOfflineBanner = false;
 
   static const _titles = <String>[
     'Home',
@@ -96,16 +110,61 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _currentIndex = widget.initialIndex;
+    _showOfflineBanner = widget.showOfflineBanner;
+    _initializeHardwareSosShortcut();
     _loadSosPreferences();
     _loadNavProfilePhoto();
+    _restoreSosStateIfNeeded();
+    if (_showOfflineBanner) {
+      _startOfflineBannerProbe();
+    }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _hardwareSosChannel.setMethodCallHandler(null);
+    _offlineBannerProbeTimer?.cancel();
     _sosLocationSubscription?.cancel();
     _sosRecordingService.disposeRecorder();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Reserved for future lifecycle handling
+  }
+
+  void _startOfflineBannerProbe() {
+    _offlineBannerProbeTimer?.cancel();
+    _offlineBannerProbeTimer = Timer.periodic(
+      const Duration(seconds: 6),
+      (_) async {
+        if (!mounted || !_showOfflineBanner) {
+          return;
+        }
+        final isOnline = await _hasInternetConnection();
+        if (!mounted || !isOnline) {
+          return;
+        }
+        setState(() {
+          _showOfflineBanner = false;
+        });
+        _offlineBannerProbeTimer?.cancel();
+        _offlineBannerProbeTimer = null;
+      },
+    );
+  }
+
+  Future<bool> _hasInternetConnection() async {
+    try {
+      final result = await InternetAddress.lookup('example.com');
+      return result.isNotEmpty && result.first.rawAddress.isNotEmpty;
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<void> _loadNavProfilePhoto() async {
@@ -154,9 +213,13 @@ class _HomeScreenState extends State<HomeScreen> {
       _autoVideoRecord = prefs.getBool(_autoVideoRecordKey) ?? false;
       _autoVoiceRecord = prefs.getBool(_autoVoiceRecordKey) ?? true;
       _vibrationOnSos = prefs.getBool(_vibrationOnSosKey) ?? true;
+      _hardwareSosShortcutEnabled =
+          prefs.getBool(_hardwareSosShortcutKey) ?? true;
       final hold = prefs.getInt(_sosHoldDurationKey) ?? 2;
       _sosHoldDuration = <int>{2, 5, 7}.contains(hold) ? hold : 2;
     });
+    await _setHardwareSosShortcutEnabled(_hardwareSosShortcutEnabled);
+    await _refreshHardwareSosPermissionStatus();
   }
 
   Future<void> _saveBoolPreference(String key, bool value) async {
@@ -167,6 +230,126 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _saveIntPreference(String key, int value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(key, value);
+  }
+
+  Future<void> _initializeHardwareSosShortcut() async {
+    try {
+      _hardwareSosChannel.setMethodCallHandler((call) async {
+        if (call.method != 'onShortcutTriggered') {
+          return;
+        }
+        if (!mounted || _isSosActive) {
+          return;
+        }
+        await _handleSosActivated();
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _setHardwareSosShortcutEnabled(bool enabled) async {
+    try {
+      await _hardwareSosChannel.invokeMethod('setEnabled', {
+        'enabled': enabled,
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _refreshHardwareSosPermissionStatus() async {
+    try {
+      final enabled = await _hardwareSosChannel.invokeMethod<bool>(
+        'isAccessibilityEnabled',
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isHardwareSosPermissionEnabled = enabled ?? false;
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _startSosForegroundService() async {
+    try {
+      await _hardwareSosChannel.invokeMethod('startSosForegroundService');
+    } catch (_) {}
+  }
+
+  Future<void> _persistActiveSosSession(String? sessionId) async {
+    final prefs = await SharedPreferences.getInstance();
+    if ((sessionId ?? '').trim().isEmpty) {
+      await prefs.remove(_activeSosSessionKey);
+      return;
+    }
+    await prefs.setString(_activeSosSessionKey, sessionId!.trim());
+  }
+
+  Future<void> _restoreSosStateIfNeeded() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedSessionId = (prefs.getString(_activeSosSessionKey) ?? '').trim();
+      if (savedSessionId.isEmpty || !mounted) {
+        return;
+      }
+
+      final serviceRunning = await _hardwareSosChannel
+              .invokeMethod<bool>('isSosForegroundServiceRunning') ??
+          false;
+
+      if (!serviceRunning) {
+        await prefs.remove(_activeSosSessionKey);
+        return;
+      }
+
+      // Check if native recordings are still active from before app restart
+      String? restoredAudioPath;
+      String? restoredVideoPath;
+      try {
+        final status = await _hardwareSosChannel
+            .invokeMapMethod<String, dynamic>('getNativeRecordingPaths');
+        if (status != null) {
+          if (status['audioActive'] == true) {
+            restoredAudioPath = 'native_audio_active';
+          }
+          if (status['videoActive'] == true) {
+            restoredVideoPath = 'native_video_active';
+          }
+        }
+      } catch (_) {}
+
+      setState(() {
+        _isSosActive = true;
+        _activeSosSessionId = savedSessionId;
+        _activeSosRecordingPath = restoredAudioPath;
+        _activeSosVideoPath = restoredVideoPath;
+      });
+
+      Position? initialPosition;
+      try {
+        initialPosition = await Geolocator.getLastKnownPosition();
+      } catch (_) {
+        initialPosition = null;
+      }
+
+      if (initialPosition == null) {
+        try {
+          initialPosition = await _getCurrentPositionWithOfflineFallback();
+        } catch (_) {
+          initialPosition = null;
+        }
+      }
+
+      if (initialPosition != null) {
+        await _startSosLocationSharing(savedSessionId, initialPosition);
+      }
+    } catch (_) {
+      return;
+    }
+  }
+
+  Future<void> _stopSosForegroundService() async {
+    try {
+      await _hardwareSosChannel.invokeMethod('stopSosForegroundService');
+    } catch (_) {}
   }
 
   Future<void> _handleSosActivated() async {
@@ -186,27 +369,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
       final shouldRecordVoice = _autoVoiceRecord || dispatch.deliveredCount > 0;
       final shouldRecordVideo = _autoVideoRecord || dispatch.deliveredCount > 0;
-      String? recordingPath;
-      String? videoPath;
+      bool audioStarted = false;
+      bool videoStarted = false;
       if (_vibrationOnSos) {
         HapticFeedback.heavyImpact();
-      }
-
-      if (shouldRecordVoice) {
-        try {
-          recordingPath = await _sosRecordingService.startRecording();
-        } catch (_) {
-          recordingPath = null;
-        }
-      }
-
-      if (shouldRecordVideo) {
-        try {
-          await _sosRecordingService.startAutoVideoRecording();
-          videoPath = 'Background video recording active';
-        } catch (_) {
-          videoPath = null;
-        }
       }
 
       if (!mounted) {
@@ -214,25 +380,55 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       setState(() {
         _isSosActive = true;
-        _activeSosRecordingPath = recordingPath;
-        _activeSosVideoPath = videoPath;
+        _activeSosRecordingPath = shouldRecordVoice ? 'native_audio_pending' : null;
+        _activeSosVideoPath = shouldRecordVideo ? 'native_video_pending' : null;
         _activeSosSessionId = dispatch.sessionId;
       });
+      await _persistActiveSosSession(dispatch.sessionId);
+      await _startSosForegroundService();
+
+      // Start native recordings via foreground service (survives app kill)
+      if (shouldRecordVoice) {
+        try {
+          await _hardwareSosChannel.invokeMethod('startNativeAudioRecording');
+          audioStarted = true;
+        } catch (_) {
+          audioStarted = false;
+        }
+      }
+
+      if (shouldRecordVideo) {
+        try {
+          await _hardwareSosChannel.invokeMethod('startNativeVideoRecording');
+          videoStarted = true;
+        } catch (_) {
+          videoStarted = false;
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _activeSosRecordingPath = audioStarted ? 'native_audio_active' : null;
+          _activeSosVideoPath = videoStarted ? 'native_video_active' : null;
+        });
+      }
+
       await _startSosLocationSharing(dispatch.sessionId, initialPosition);
       if (!mounted) {
         return;
       }
+      final activationDetails = _buildSosActivatedMessage(
+        deliveredCount: dispatch.deliveredCount,
+        skippedCount: dispatch.skippedCount,
+        recordingStarted: audioStarted || videoStarted,
+        pushDeliveredCount: dispatch.pushDeliveredCount,
+        pushSkippedCount: dispatch.pushSkippedCount,
+        pushErrorMessage: dispatch.pushErrorMessage,
+      );
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            _buildSosActivatedMessage(
-              deliveredCount: dispatch.deliveredCount,
-              skippedCount: dispatch.skippedCount,
-              recordingStarted: recordingPath != null || shouldRecordVideo,
-              pushDeliveredCount: dispatch.pushDeliveredCount,
-              pushSkippedCount: dispatch.pushSkippedCount,
-              pushErrorMessage: dispatch.pushErrorMessage,
-            ),
+            'Help is on the way. Stay calm and move to safety. $activationDetails',
           ),
           backgroundColor: Colors.red,
         ),
@@ -251,46 +447,104 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _stopSos() async {
-    await _sosLocationSubscription?.cancel();
-    _sosLocationSubscription = null;
+    if (_isStoppingSos || !_isSosActive) {
+      return;
+    }
 
-    final recordingPath = _sosRecordingService.isRecordingActive
-        ? await _sosRecordingService.stopRecording()
-        : null;
-    String? videoPath;
-    if (_autoVideoRecord) {
+    _isStoppingSos = true;
+    final activeSessionId = _activeSosSessionId;
+    final previousRecordingPath = _activeSosRecordingPath;
+    final previousVideoPath = _activeSosVideoPath;
+
+    if (mounted) {
+      setState(() {
+        _isSosActive = false;
+        _activeSosSessionId = null;
+      });
+      unawaited(_persistActiveSosSession(null));
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Stopping SOS... finalizing safety logs.'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+
+    String? savedPath = previousRecordingPath;
+    String? savedVideo = previousVideoPath;
+    try {
+      await _sosLocationSubscription?.cancel();
+      _sosLocationSubscription = null;
+
+      // Stop native audio recording via foreground service
+      String? recordingPath;
       try {
-        videoPath = await _sosRecordingService.stopAutoVideoRecording();
+        final isAudioActive = await _hardwareSosChannel
+                .invokeMethod<bool>('isNativeAudioRecording') ??
+            false;
+        if (isAudioActive) {
+          recordingPath = await _hardwareSosChannel
+              .invokeMethod<String>('stopNativeAudioRecording');
+        }
+      } catch (_) {
+        recordingPath = null;
+      }
+
+      // Stop native video recording via foreground service
+      String? videoPath;
+      try {
+        final isVideoActive = await _hardwareSosChannel
+                .invokeMethod<bool>('isNativeVideoRecording') ??
+            false;
+        if (isVideoActive) {
+          videoPath = await _hardwareSosChannel
+              .invokeMethod<String>('stopNativeVideoRecording');
+        }
       } catch (_) {
         videoPath = null;
       }
+
+      savedPath = recordingPath ?? previousRecordingPath;
+      savedVideo = videoPath ?? previousVideoPath;
+
+      // Save native recording entries to local database
+      if (recordingPath != null) {
+        try {
+          await _sosRecordingService.saveNativeAudioEntry(recordingPath);
+        } catch (_) {}
+      }
+      if (videoPath != null) {
+        try {
+          await _sosRecordingService.saveNativeVideoEntry(videoPath);
+        } catch (_) {}
+      }
+
+      if (activeSessionId != null) {
+        await _sosAlertService.resolveAlertSession(
+          sessionId: activeSessionId,
+          voiceRecordingPath: savedPath,
+          videoRecordingPath: savedVideo,
+        );
+      }
+    } finally {
+      await _stopSosForegroundService();
+      if (mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        setState(() {
+          _activeSosRecordingPath = savedPath;
+          _activeSosVideoPath = savedVideo;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _buildStopSosMessage(savedPath, savedVideo),
+            ),
+          ),
+        );
+      }
+      _isStoppingSos = false;
     }
-    final savedPath = recordingPath ?? _activeSosRecordingPath;
-    final savedVideo = videoPath ?? _activeSosVideoPath;
-    final activeSessionId = _activeSosSessionId;
-    if (activeSessionId != null) {
-      await _sosAlertService.resolveAlertSession(
-        sessionId: activeSessionId,
-        voiceRecordingPath: savedPath,
-        videoRecordingPath: savedVideo,
-      );
-    }
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _isSosActive = false;
-      _activeSosRecordingPath = savedPath;
-      _activeSosVideoPath = savedVideo;
-      _activeSosSessionId = null;
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          _buildStopSosMessage(savedPath, savedVideo),
-        ),
-      ),
-    );
   }
 
   String _buildSosAlertMessage() {
@@ -330,17 +584,29 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<Position> _getSosPosition() async {
     final cached = await Geolocator.getLastKnownPosition();
     try {
-      return await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          timeLimit: Duration(seconds: 8),
-        ),
-      );
+      return await _getCurrentPositionWithOfflineFallback();
     } catch (_) {
       if (cached != null) {
         return cached;
       }
       rethrow;
+    }
+  }
+
+  Future<Position> _getCurrentPositionWithOfflineFallback() async {
+    try {
+      return await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.bestForNavigation,
+          timeLimit: Duration(seconds: 8),
+        ),
+      );
+    } catch (_) {
+      return Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.bestForNavigation,
+        ),
+      );
     }
   }
 
@@ -353,8 +619,8 @@ class _HomeScreenState extends State<HomeScreen> {
     await _sosLocationSubscription?.cancel();
     _sosLocationSubscription = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 8,
+        accuracy: LocationAccuracy.bestForNavigation,
+        distanceFilter: 3,
       ),
     ).listen((position) async {
       if (!position.latitude.isFinite || !position.longitude.isFinite) {
@@ -399,12 +665,12 @@ class _HomeScreenState extends State<HomeScreen> {
       return 'SOS stopped. Recording ended.';
     }
     if (audioPath != null && videoPath != null) {
-      return 'SOS stopped. Audio and video saved.';
+      return 'SOS stopped. Audio and video recordings saved.';
     }
     if (audioPath != null) {
-      return 'SOS stopped. Audio saved to $audioPath';
+      return 'SOS stopped. Audio recording saved.';
     }
-    return 'SOS stopped. Video saved to $videoPath';
+    return 'SOS stopped. Video recording saved.';
   }
 
   void _handleBackNavigation() {
@@ -483,97 +749,150 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         ),
-        body: IndexedStack(
-          index: _currentIndex,
+        body: Column(
           children: [
-            _HomeTab(
-              user: user,
-              isSosActive: _isSosActive,
-              onSosActivated: _handleSosActivated,
-              onStopSos: _stopSos,
-              holdDuration: _sosHoldDuration,
-            ),
-            _LiveMapTab(
-              isSosActive: _isSosActive,
-              onStopSos: _stopSos,
-            ),
-            _ProfileTab(
-              user: user,
-              onProfilePhotoChanged: (path) {
-                setState(() {
-                  _navProfilePhotoPath = path;
-                });
-              },
-            ),
-            _SettingsTab(
-              user: user,
-              themeModeController: themeModeController,
-              onOpenEmergencyContacts: () {
-                setState(() => _currentIndex = 2);
-              },
-              onOpenSosInbox: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const SosAlertsScreen()),
-                );
-              },
-              onLogout: authService.signOut,
-              autoVideoRecord: _autoVideoRecord,
-              autoVoiceRecord: _autoVoiceRecord,
-              vibrationOnSos: _vibrationOnSos,
-              holdDuration: _sosHoldDuration,
-              onOpenBatteryOptimizationSettings: () {
-                return DeviceSettingsService.openBatteryOptimizationSettings();
-              },
-              onManageSubscription: () async {
-                try {
-                  final result = await RevenueCatService.presentPaywall();
-                  if (!context.mounted) {
-                    return;
-                  }
-                  final message = switch (result) {
-                    PaywallResult.purchased =>
-                      'Purchase complete. Your subscription is now active.',
-                    PaywallResult.restored =>
-                      'Purchases restored for this account.',
-                    PaywallResult.cancelled =>
-                      'Checkout closed. No changes were made.',
-                    PaywallResult.notPresented =>
-                      'No active paywall was found in RevenueCat.',
-                    PaywallResult.error =>
-                      'Unable to open checkout right now. Please try again.',
-                  };
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(message)),
-                  );
-                } catch (_) {
-                  if (!context.mounted) {
-                    return;
-                  }
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text(
-                        'Unable to open checkout right now. Please try again.',
-                      ),
-                    ),
-                  );
-                }
-              },
-              onAutoVideoRecordChanged: (value) {
-                setState(() => _autoVideoRecord = value);
-                _saveBoolPreference(_autoVideoRecordKey, value);
-              },
-              onAutoVoiceRecordChanged: (value) {
-                setState(() => _autoVoiceRecord = value);
-                _saveBoolPreference(_autoVoiceRecordKey, value);
-              },
-              onVibrationOnSosChanged: (value) {
-                setState(() => _vibrationOnSos = value);
-                _saveBoolPreference(_vibrationOnSosKey, value);
-              },
-              onHoldDurationChanged: (value) {
-                setState(() => _sosHoldDuration = value);
-                _saveIntPreference(_sosHoldDurationKey, value);
-              },
+            if (_showOfflineBanner)
+              Container(
+                width: double.infinity,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                color: const Color(0xFFB45309),
+                child: const Text(
+                  'Offline mode: some live features are temporarily unavailable.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            Expanded(
+              child: IndexedStack(
+                index: _currentIndex,
+                children: [
+                  _HomeTab(
+                    user: user,
+                    isSosActive: _isSosActive,
+                    onSosActivated: _handleSosActivated,
+                    onStopSos: _stopSos,
+                    holdDuration: _sosHoldDuration,
+                  ),
+                  _LiveMapTab(
+                    isSosActive: _isSosActive,
+                    onStopSos: _stopSos,
+                  ),
+                  _ProfileTab(
+                    user: user,
+                    onProfilePhotoChanged: (path) {
+                      setState(() {
+                        _navProfilePhotoPath = path;
+                      });
+                    },
+                  ),
+                  _SettingsTab(
+                    user: user,
+                    themeModeController: themeModeController,
+                    onOpenEmergencyContacts: () {
+                      setState(() => _currentIndex = 2);
+                    },
+                    onOpenSosInbox: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                            builder: (_) => const SosAlertsScreen()),
+                      );
+                    },
+                    onLogout: authService.signOut,
+                    autoVideoRecord: _autoVideoRecord,
+                    autoVoiceRecord: _autoVoiceRecord,
+                    vibrationOnSos: _vibrationOnSos,
+                    hardwareSosShortcutEnabled: _hardwareSosShortcutEnabled,
+                    hardwareSosPermissionEnabled:
+                        _isHardwareSosPermissionEnabled,
+                    holdDuration: _sosHoldDuration,
+                    onOpenBatteryOptimizationSettings: () {
+                      return DeviceSettingsService
+                          .openBatteryOptimizationSettings();
+                    },
+                    onManageSubscription: () async {
+                      try {
+                        final result = await RevenueCatService.presentPaywall();
+                        if (!context.mounted) {
+                          return;
+                        }
+                        final message = switch (result) {
+                          PaywallResult.purchased =>
+                            'Purchase complete. Your subscription is now active.',
+                          PaywallResult.restored =>
+                            'Purchases restored for this account.',
+                          PaywallResult.cancelled =>
+                            'Checkout closed. No changes were made.',
+                          PaywallResult.notPresented =>
+                            'No active paywall was found in RevenueCat.',
+                          PaywallResult.error =>
+                            'Unable to open checkout right now. Please try again.',
+                        };
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text(message)),
+                        );
+                      } catch (_) {
+                        if (!context.mounted) {
+                          return;
+                        }
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Unable to open checkout right now. Please try again.',
+                            ),
+                          ),
+                        );
+                      }
+                    },
+                    onAutoVideoRecordChanged: (value) {
+                      setState(() => _autoVideoRecord = value);
+                      _saveBoolPreference(_autoVideoRecordKey, value);
+                    },
+                    onAutoVoiceRecordChanged: (value) {
+                      setState(() => _autoVoiceRecord = value);
+                      _saveBoolPreference(_autoVoiceRecordKey, value);
+                    },
+                    onVibrationOnSosChanged: (value) {
+                      setState(() => _vibrationOnSos = value);
+                      _saveBoolPreference(_vibrationOnSosKey, value);
+                    },
+                    onOpenHardwareShortcutSettings: () async {
+                      try {
+                        await _hardwareSosChannel
+                            .invokeMethod('openAccessibilitySettings');
+                        await Future<void>.delayed(
+                          const Duration(milliseconds: 800),
+                        );
+                        await _refreshHardwareSosPermissionStatus();
+                      } catch (_) {
+                        if (!context.mounted) {
+                          return;
+                        }
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Could not open accessibility settings.',
+                            ),
+                          ),
+                        );
+                      }
+                    },
+                    onHardwareSosShortcutChanged: (value) async {
+                      setState(() => _hardwareSosShortcutEnabled = value);
+                      await _saveBoolPreference(_hardwareSosShortcutKey, value);
+                      await _setHardwareSosShortcutEnabled(value);
+                      await _refreshHardwareSosPermissionStatus();
+                    },
+                    onHoldDurationChanged: (value) {
+                      setState(() => _sosHoldDuration = value);
+                      _saveIntPreference(_sosHoldDurationKey, value);
+                    },
+                  ),
+                ],
+              ),
             ),
           ],
         ),
@@ -586,6 +905,9 @@ class _HomeScreenState extends State<HomeScreen> {
             onTap: (index) {
               if (_currentIndex == index) return;
               setState(() => _currentIndex = index);
+              if (index == 3) {
+                _refreshHardwareSosPermissionStatus();
+              }
             },
           ),
         ),
@@ -1417,6 +1739,12 @@ class _LiveMapTab extends StatefulWidget {
 class _LiveMapTabState extends State<_LiveMapTab> with WidgetsBindingObserver {
   final MapController _mapController = MapController();
   static const _walkingSpeedMetersPerSecond = 1.4;
+  static const _offlineRouteCacheKey = 'live_map_offline_route_cache_v1';
+  static const _stationsCacheKey = 'live_map_police_stations_cache_v1';
+  static const _stationsCacheTtl = Duration(minutes: 10);
+  static const _stationsCacheMaxDistanceMeters = 3000.0;
+  static const _stationsFetchTimeout = Duration(seconds: 6);
+  static const _graphBuildTimeout = Duration(seconds: 7);
   StreamSubscription<Position>? _positionSubscription;
   Position? _position;
   latlng.LatLng? _nearestPoliceStation;
@@ -1427,9 +1755,11 @@ class _LiveMapTabState extends State<_LiveMapTab> with WidgetsBindingObserver {
   bool _isLoading = true;
   bool _isRequestingPermission = false;
   bool _isFetchingPoliceRoute = false;
+  bool _isUsingCachedStations = false;
   String? _errorMessage;
   int _activePointers = 0;
   Position? _pendingPosition;
+  bool _hasAutoOpenedNavigationForActiveSos = false;
 
   bool get _userIsInteracting => _activePointers > 0;
 
@@ -1451,6 +1781,20 @@ class _LiveMapTabState extends State<_LiveMapTab> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _initLocationTracking();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _LiveMapTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (!oldWidget.isSosActive && widget.isSosActive) {
+      _hasAutoOpenedNavigationForActiveSos = false;
+      _maybeAutoOpenSosNavigation();
+    }
+
+    if (oldWidget.isSosActive && !widget.isSosActive) {
+      _hasAutoOpenedNavigationForActiveSos = false;
     }
   }
 
@@ -1477,6 +1821,90 @@ class _LiveMapTabState extends State<_LiveMapTab> with WidgetsBindingObserver {
     setState(() {});
     _moveCameraTo(latlng.LatLng(pending.latitude, pending.longitude));
     _fetchNearestPoliceRoute(pending);
+  }
+
+  Future<void> _applyCachedOfflineRoute(Position position) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_offlineRouteCacheKey);
+    if (raw == null || raw.trim().isEmpty || !mounted) {
+      return;
+    }
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map<String, dynamic>) {
+        return;
+      }
+      final originLat = (decoded['origin_lat'] as num?)?.toDouble();
+      final originLon = (decoded['origin_lon'] as num?)?.toDouble();
+      final stationLat = (decoded['station_lat'] as num?)?.toDouble();
+      final stationLon = (decoded['station_lon'] as num?)?.toDouble();
+      final pointsRaw = decoded['route_points'];
+      if (originLat == null ||
+          originLon == null ||
+          stationLat == null ||
+          stationLon == null ||
+          pointsRaw is! List) {
+        return;
+      }
+
+      final distanceFromCacheOrigin = Geolocator.distanceBetween(
+        position.latitude,
+        position.longitude,
+        originLat,
+        originLon,
+      );
+      if (distanceFromCacheOrigin > 4000) {
+        return;
+      }
+
+      final points = <latlng.LatLng>[];
+      for (final item in pointsRaw) {
+        if (item is! List || item.length != 2) continue;
+        final lat = (item[0] as num?)?.toDouble();
+        final lon = (item[1] as num?)?.toDouble();
+        if (lat == null || lon == null || !lat.isFinite || !lon.isFinite) {
+          continue;
+        }
+        points.add(latlng.LatLng(lat, lon));
+      }
+      if (points.length < 2) {
+        return;
+      }
+
+      setState(() {
+        _nearestPoliceStation = latlng.LatLng(stationLat, stationLon);
+        _routePoints = points;
+        _routeDistanceKm = (decoded['route_distance_km'] as num?)?.toDouble();
+        _routeEtaMinutes = (decoded['route_eta_minutes'] as num?)?.toDouble();
+      });
+    } catch (_) {
+      return;
+    }
+  }
+
+  Future<void> _cacheOfflineRoute({
+    required Position origin,
+    required latlng.LatLng station,
+    required List<latlng.LatLng> routePoints,
+    required double? routeDistanceKm,
+    required double? routeEtaMinutes,
+  }) async {
+    if (routePoints.length < 2) {
+      return;
+    }
+    final payload = {
+      'origin_lat': origin.latitude,
+      'origin_lon': origin.longitude,
+      'station_lat': station.latitude,
+      'station_lon': station.longitude,
+      'route_distance_km': routeDistanceKm,
+      'route_eta_minutes': routeEtaMinutes,
+      'route_points': routePoints
+          .map((point) => [point.latitude, point.longitude])
+          .toList(),
+    };
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_offlineRouteCacheKey, jsonEncode(payload));
   }
 
   Future<void> _initLocationTracking() async {
@@ -1543,12 +1971,7 @@ class _LiveMapTabState extends State<_LiveMapTab> with WidgetsBindingObserver {
         await _fetchNearestPoliceRoute(cached, forceRefresh: true);
       }
 
-      final current = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          timeLimit: Duration(seconds: 8),
-        ),
-      );
+      final current = await _getCurrentPositionWithOfflineFallback();
 
       if (!mounted) return;
       if (current.latitude.isFinite && current.longitude.isFinite) {
@@ -1566,8 +1989,8 @@ class _LiveMapTabState extends State<_LiveMapTab> with WidgetsBindingObserver {
       await _positionSubscription?.cancel();
       _positionSubscription = Geolocator.getPositionStream(
         locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          distanceFilter: 8,
+          accuracy: LocationAccuracy.bestForNavigation,
+          distanceFilter: 3,
         ),
       ).listen((position) {
         if (!mounted) return;
@@ -1591,8 +2014,28 @@ class _LiveMapTabState extends State<_LiveMapTab> with WidgetsBindingObserver {
             ? 'Unable to fetch location right now. Please try again.'
             : null;
       });
+      if (_position != null) {
+        await _applyCachedOfflineRoute(_position!);
+      }
     } finally {
       _isRequestingPermission = false;
+    }
+  }
+
+  Future<Position> _getCurrentPositionWithOfflineFallback() async {
+    try {
+      return await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.bestForNavigation,
+          timeLimit: Duration(seconds: 8),
+        ),
+      );
+    } catch (_) {
+      return Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.bestForNavigation,
+        ),
+      );
     }
   }
 
@@ -1634,19 +2077,36 @@ class _LiveMapTabState extends State<_LiveMapTab> with WidgetsBindingObserver {
       _PoliceStation? selectedStation;
       _RouteInfo? selectedRoute;
       final candidateStations = stations.take(4).toList();
-      var walkingGraph = await _buildWalkingGraph(
-        origin: origin,
-        destinations:
-            candidateStations.map((station) => station.position).toList(),
-      );
+
+      final quickStation = candidateStations.first;
+      final quickRoute =
+          _buildDirectRoute(from: origin, to: quickStation.position);
+      if (mounted) {
+        setState(() {
+          _nearestPoliceStation = quickStation.position;
+          _routePoints = quickRoute.points;
+          _routeDistanceKm = quickRoute.distanceMeters != null
+              ? quickRoute.distanceMeters! / 1000
+              : null;
+          _routeEtaMinutes = quickRoute.durationSeconds != null
+              ? quickRoute.durationSeconds! / 60
+              : null;
+        });
+      }
 
       Future<void> chooseBestRoute() async {
+        final graph = await _buildWalkingGraph(
+          origin: origin,
+          destinations: candidateStations.map((s) => s.position).toList(),
+        ).timeout(_graphBuildTimeout);
+
         for (final station in candidateStations) {
           final route = await _buildRouteToPoliceStation(
             from: origin,
             to: station.position,
-            graph: walkingGraph,
+            graph: graph,
           );
+
           if (route == null && selectedStation == null) {
             selectedStation = station;
             continue;
@@ -1665,46 +2125,77 @@ class _LiveMapTabState extends State<_LiveMapTab> with WidgetsBindingObserver {
         }
       }
 
-      await chooseBestRoute();
-
-      if (selectedRoute == null && candidateStations.isNotEmpty) {
-        walkingGraph = await _buildWalkingGraph(
-          origin: origin,
-          destinations:
-              candidateStations.map((station) => station.position).toList(),
-          paddingDegrees: 0.02,
-        );
+      try {
         await chooseBestRoute();
+      } on TimeoutException {
+        selectedStation = quickStation;
+        selectedRoute = quickRoute;
       }
 
-      final station = selectedStation ?? stations.first;
+      final station = selectedStation ?? quickStation;
+      final route = selectedRoute ?? quickRoute;
 
       if (!mounted) return;
-      final distanceMeters = selectedRoute?.distanceMeters;
-      final durationSeconds = selectedRoute?.durationSeconds;
+      final distanceMeters = route.distanceMeters;
+      final durationSeconds = route.durationSeconds;
       setState(() {
         _nearestPoliceStation = station.position;
-        _routePoints = selectedRoute?.points ??
-            [
-              origin,
-              station.position,
-            ];
+        _routePoints = route.points;
         _routeDistanceKm =
             distanceMeters != null ? distanceMeters / 1000 : null;
         _routeEtaMinutes =
             durationSeconds != null ? durationSeconds / 60 : null;
       });
+      _maybeAutoOpenSosNavigation();
+      await _cacheOfflineRoute(
+        origin: position,
+        station: station.position,
+        routePoints: _routePoints,
+        routeDistanceKm: _routeDistanceKm,
+        routeEtaMinutes: _routeEtaMinutes,
+      );
     } catch (_) {
-      if (!mounted || _nearestPoliceStation != null) return;
+      if (!mounted) return;
+      await _applyCachedOfflineRoute(position);
+      _maybeAutoOpenSosNavigation();
     } finally {
       _isFetchingPoliceRoute = false;
     }
+  }
+
+  void _maybeAutoOpenSosNavigation() {
+    if (!widget.isSosActive || _hasAutoOpenedNavigationForActiveSos) {
+      return;
+    }
+    if (_position == null || _nearestPoliceStation == null) {
+      return;
+    }
+    _hasAutoOpenedNavigationForActiveSos = true;
   }
 
   Future<List<_PoliceStation>> _findNearestPoliceStations({
     required double latitude,
     required double longitude,
   }) async {
+    final cachedStations = await _getCachedPoliceStations(
+      latitude: latitude,
+      longitude: longitude,
+    );
+    if (cachedStations != null && cachedStations.isNotEmpty) {
+      if (mounted && !_isUsingCachedStations) {
+        setState(() {
+          _isUsingCachedStations = true;
+        });
+      }
+      return cachedStations;
+    }
+
+    if (mounted && _isUsingCachedStations) {
+      setState(() {
+        _isUsingCachedStations = false;
+      });
+    }
+
     final query =
         '[out:json][timeout:20];(node["amenity"="police"](around:7000,$latitude,$longitude);way["amenity"="police"](around:7000,$latitude,$longitude););out center 1;';
     final uri =
@@ -1712,7 +2203,7 @@ class _LiveMapTabState extends State<_LiveMapTab> with WidgetsBindingObserver {
     final response = await http.get(uri, headers: {
       'User-Agent': 'Aegixa/1.0 (safety app)',
       'Accept': 'application/json',
-    });
+    }).timeout(_stationsFetchTimeout);
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
       return const [];
@@ -1767,7 +2258,133 @@ class _LiveMapTabState extends State<_LiveMapTab> with WidgetsBindingObserver {
     stations.sort(
       (a, b) => a.straightLineDistance.compareTo(b.straightLineDistance),
     );
-    return stations.map((entry) => entry.station).take(6).toList();
+    final result = stations.map((entry) => entry.station).take(6).toList();
+    if (result.isNotEmpty) {
+      await _cachePoliceStations(
+        originLatitude: latitude,
+        originLongitude: longitude,
+        stations: result,
+      );
+    }
+    return result;
+  }
+
+  Future<List<_PoliceStation>?> _getCachedPoliceStations({
+    required double latitude,
+    required double longitude,
+  }) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_stationsCacheKey);
+      if (raw == null || raw.isEmpty) return null;
+
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map<String, dynamic>) return null;
+
+      final cachedAtMs = (decoded['cached_at_ms'] as num?)?.toInt();
+      final originLat = (decoded['origin_lat'] as num?)?.toDouble();
+      final originLon = (decoded['origin_lon'] as num?)?.toDouble();
+      final stationsRaw = decoded['stations'];
+
+      if (cachedAtMs == null ||
+          originLat == null ||
+          originLon == null ||
+          stationsRaw is! List) {
+        return null;
+      }
+
+      final cacheAge = DateTime.now().millisecondsSinceEpoch - cachedAtMs;
+      if (cacheAge > _stationsCacheTtl.inMilliseconds) {
+        return null;
+      }
+
+      final distanceFromCacheOrigin = Geolocator.distanceBetween(
+        latitude,
+        longitude,
+        originLat,
+        originLon,
+      );
+      if (distanceFromCacheOrigin > _stationsCacheMaxDistanceMeters) {
+        return null;
+      }
+
+      final stations = <_PoliceStation>[];
+      for (final item in stationsRaw) {
+        if (item is! Map<String, dynamic>) continue;
+        final name = item['name'] as String?;
+        final lat = (item['lat'] as num?)?.toDouble();
+        final lon = (item['lon'] as num?)?.toDouble();
+        if (name == null || lat == null || lon == null) continue;
+        if (!lat.isFinite || !lon.isFinite) continue;
+        stations.add(
+          _PoliceStation(name: name, position: latlng.LatLng(lat, lon)),
+        );
+      }
+
+      if (stations.isEmpty) return null;
+
+      stations.sort((a, b) {
+        final aDistance = Geolocator.distanceBetween(
+          latitude,
+          longitude,
+          a.position.latitude,
+          a.position.longitude,
+        );
+        final bDistance = Geolocator.distanceBetween(
+          latitude,
+          longitude,
+          b.position.latitude,
+          b.position.longitude,
+        );
+        return aDistance.compareTo(bDistance);
+      });
+      return stations.take(6).toList();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _cachePoliceStations({
+    required double originLatitude,
+    required double originLongitude,
+    required List<_PoliceStation> stations,
+  }) async {
+    try {
+      final payload = {
+        'cached_at_ms': DateTime.now().millisecondsSinceEpoch,
+        'origin_lat': originLatitude,
+        'origin_lon': originLongitude,
+        'stations': stations
+            .map((station) => {
+                  'name': station.name,
+                  'lat': station.position.latitude,
+                  'lon': station.position.longitude,
+                })
+            .toList(),
+      };
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_stationsCacheKey, jsonEncode(payload));
+    } catch (_) {
+      return;
+    }
+  }
+
+  _RouteInfo _buildDirectRoute({
+    required latlng.LatLng from,
+    required latlng.LatLng to,
+  }) {
+    final distanceMeters = Geolocator.distanceBetween(
+      from.latitude,
+      from.longitude,
+      to.latitude,
+      to.longitude,
+    );
+    final durationSeconds = distanceMeters / _walkingSpeedMetersPerSecond;
+    return _RouteInfo(
+      points: [from, to],
+      distanceMeters: distanceMeters,
+      durationSeconds: durationSeconds,
+    );
   }
 
   Future<_RouteInfo?> _buildRouteToPoliceStation({
@@ -2256,6 +2873,19 @@ out body;
                   ),
                 ),
               ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: FilledButton.icon(
+                  onPressed: _startWalkingNavigation,
+                  icon: const Icon(Icons.directions_walk_rounded),
+                  label: const Text(
+                    'Show Route in Google Maps',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ),
               if (_errorMessage != null) ...[
                 const SizedBox(height: 12),
                 SizedBox(
@@ -2298,7 +2928,28 @@ out body;
       return ColoredBox(
         color: isDark ? const Color(0xFF101010) : const Color(0xFFF8FAFC),
         child: Center(
-          child: CircularProgressIndicator(color: theme.colorScheme.primary),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(color: theme.colorScheme.primary),
+              const SizedBox(height: 14),
+              Text(
+                'Acquiring GPS signal...',
+                style: TextStyle(
+                  color: theme.colorScheme.onSurface.withValues(alpha: 0.82),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'This may take longer when offline.',
+                style: TextStyle(
+                  color: theme.colorScheme.onSurface.withValues(alpha: 0.66),
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
         ),
       );
     }
@@ -2344,7 +2995,7 @@ out body;
         options: MapOptions(
           initialCenter: current,
           initialZoom: 16,
-          maxZoom: 19,
+          maxZoom: 22,
           minZoom: 3,
         ),
         children: [
@@ -2353,6 +3004,8 @@ out body;
             userAgentPackageName: 'com.example.aegixa',
             retinaMode: RetinaMode.isHighDensity(context),
             maxNativeZoom: 19,
+            keepBuffer: 8,
+            panBuffer: 4,
           ),
           if (routePoints.length >= 2 &&
               routePoints
@@ -2385,13 +3038,22 @@ out body;
             markers: [
               Marker(
                 point: current,
-                width: 28,
-                height: 28,
-                child: Icon(
-                  Icons.my_location,
-                  color: theme.colorScheme.primary,
-                  size: 24,
-                ),
+                width: 32,
+                height: 32,
+                child: _position!.heading >= 0 && _position!.speed > 0.5
+                    ? Transform.rotate(
+                        angle: _position!.heading * (3.141592653589793 / 180),
+                        child: Icon(
+                          Icons.navigation,
+                          color: theme.colorScheme.primary,
+                          size: 28,
+                        ),
+                      )
+                    : Icon(
+                        Icons.my_location,
+                        color: theme.colorScheme.primary,
+                        size: 24,
+                      ),
               ),
               if (destination != null)
                 Marker(
@@ -2449,6 +3111,49 @@ out body;
           ],
         ),
       ),
+    );
+  }
+
+  Future<void> _startWalkingNavigation({bool silent = false}) async {
+    final destination = _nearestPoliceStation;
+    final current = _position;
+    if (destination == null || current == null) {
+      if (!mounted || silent) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Waiting for route. Please try again in a moment.'),
+        ),
+      );
+      return;
+    }
+
+    final destinationParam = '${destination.latitude},${destination.longitude}';
+    final originParam = '${current.latitude},${current.longitude}';
+    final googleMapsUri = Uri.parse(
+      'https://www.google.com/maps/dir/?api=1&origin=$originParam&destination=$destinationParam&travelmode=walking',
+    );
+
+    final openedGoogleMaps = await launchUrl(
+      googleMapsUri,
+      mode: LaunchMode.externalApplication,
+    );
+    if (openedGoogleMaps || !mounted) {
+      return;
+    }
+
+    final geoUri = Uri.parse('geo:0,0?q=$destinationParam');
+    final openedGeo = await launchUrl(
+      geoUri,
+      mode: LaunchMode.externalApplication,
+    );
+    if (openedGeo || !mounted || silent) {
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Could not open maps app.')),
     );
   }
 }
@@ -2761,11 +3466,12 @@ class _StoredEmergencyContactTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final imageProvider = _contactImageProvider();
 
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
+        color: isDark ? const Color(0xFF0D0D0D) : const Color(0xFFFBFBFD),
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
           color: isDark ? const Color(0xFF2A2A2A) : const Color(0xFFE5E7EB),
@@ -2781,8 +3487,8 @@ class _StoredEmergencyContactTile extends StatelessWidget {
                 backgroundColor:
                     theme.colorScheme.primary.withValues(alpha: 0.12),
                 foregroundColor: theme.colorScheme.primary,
-                backgroundImage: _contactImageProvider(),
-                child: _contactImageProvider() == null
+                backgroundImage: imageProvider,
+                child: imageProvider == null
                     ? const Icon(Icons.person_outline)
                     : null,
               ),
@@ -2858,12 +3564,66 @@ class _StoredEmergencyContactTile extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 14),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: onCall,
-              icon: const Icon(Icons.call_outlined),
-              label: const Text('Call'),
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: onCall,
+                  icon: const Icon(Icons.call_outlined),
+                  label: const Text('Call'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: onEdit,
+                  icon: const Icon(Icons.edit_outlined),
+                  label: const Text('Edit'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProfileMetaChip extends StatelessWidget {
+  const _ProfileMetaChip({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF151515) : const Color(0xFFF1F5F9),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: isDark ? const Color(0xFF272727) : const Color(0xFFE2E8F0),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: 14,
+            color: isDark ? const Color(0xFFA3A3A3) : const Color(0xFF64748B),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: isDark ? const Color(0xFFD4D4D4) : const Color(0xFF334155),
             ),
           ),
         ],
@@ -3105,13 +3865,20 @@ class _ProfileTabState extends State<_ProfileTab> {
   Future<void> _loadContacts() async {
     try {
       final contacts = await _service.getContacts();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _contacts = contacts;
+        _isLoadingContacts = false;
+      });
+
       final mergedContacts = await _syncContactProfilePhotos(contacts);
       if (!mounted) {
         return;
       }
       setState(() {
         _contacts = mergedContacts;
-        _isLoadingContacts = false;
       });
     } catch (e) {
       if (!mounted) {
@@ -3145,8 +3912,9 @@ class _ProfileTabState extends State<_ProfileTab> {
       try {
         // Use direct profile lookup instead of searchUsers, which can
         // silently fail to enrich the photo_path field.
-        final profile =
-            await _usernameService.getPublicProfileForUsername(username);
+        final profile = await _usernameService
+            .getPublicProfileForUsername(username)
+            .timeout(const Duration(seconds: 2), onTimeout: () => null);
         final remotePhoto = (profile?.profilePhotoPath ?? '').trim();
         final currentPhoto = (contact.profilePhotoPath ?? '').trim();
 
@@ -3223,7 +3991,10 @@ class _ProfileTabState extends State<_ProfileTab> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final contactCount = _contacts.length;
     final user = widget.user;
+    final hasUsername = (_username ?? '').isNotEmpty;
+    final hasPhone = (user?.phoneNumber ?? '').isNotEmpty;
 
     return ListView(
       padding: const EdgeInsets.all(20),
@@ -3235,20 +4006,28 @@ class _ProfileTabState extends State<_ProfileTab> {
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: isDark
-                  ? const [Color(0xFF161616), Color(0xFF090909)]
-                  : const [Colors.white, Color(0xFFFDF2F8)],
+                  ? const [Color(0xFF191919), Color(0xFF0E0E0E)]
+                  : const [Color(0xFFFFFBFD), Color(0xFFF5F7FF)],
             ),
             borderRadius: BorderRadius.circular(28),
             border: Border.all(
-              color: isDark ? const Color(0xFF2A2A2A) : const Color(0xFFF3D2E0),
+              color: isDark ? const Color(0xFF2A2A2A) : const Color(0xFFE8EAF2),
             ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.06),
+                blurRadius: 18,
+                offset: const Offset(0, 8),
+              ),
+            ],
           ),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Stack(
                 children: [
                   CircleAvatar(
-                    radius: 36,
+                    radius: 34,
                     backgroundColor:
                         theme.colorScheme.primary.withValues(alpha: 0.18),
                     backgroundImage: _profileImageProvider(),
@@ -3297,13 +4076,13 @@ class _ProfileTabState extends State<_ProfileTab> {
                     Text(
                       _profileName(),
                       style: TextStyle(
-                        fontSize: 22,
+                        fontSize: 28,
                         fontWeight: FontWeight.w800,
                         color: theme.colorScheme.onSurface,
                       ),
                     ),
                     const SizedBox(height: 6),
-                    if ((_username ?? '').isNotEmpty)
+                    if (hasUsername)
                       Text(
                         '@${_username!}',
                         style: TextStyle(
@@ -3311,7 +4090,7 @@ class _ProfileTabState extends State<_ProfileTab> {
                           fontWeight: FontWeight.w700,
                         ),
                       ),
-                    if ((_username ?? '').isNotEmpty) const SizedBox(height: 4),
+                    if (hasUsername) const SizedBox(height: 4),
                     if ((user?.email ?? '').isNotEmpty)
                       Text(
                         user!.email!,
@@ -3333,6 +4112,22 @@ class _ProfileTabState extends State<_ProfileTab> {
                           ),
                         ),
                       ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _ProfileMetaChip(
+                          icon: Icons.groups_2_outlined,
+                          label: '$contactCount contacts',
+                        ),
+                        if (hasPhone)
+                          const _ProfileMetaChip(
+                            icon: Icons.phone_outlined,
+                            label: 'Phone linked',
+                          ),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -3347,18 +4142,34 @@ class _ProfileTabState extends State<_ProfileTab> {
               Text(
                 'Primary contacts',
                 style: TextStyle(
-                  fontSize: 18,
+                  fontSize: 19,
                   fontWeight: FontWeight.w700,
                   color: theme.colorScheme.onSurface,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'People who receive your SOS alerts first.',
+                style: TextStyle(
+                  color: isDark
+                      ? const Color(0xFFA3A3A3)
+                      : const Color(0xFF6B7280),
+                  fontWeight: FontWeight.w500,
                 ),
               ),
               const SizedBox(height: 14),
               SizedBox(
                 width: double.infinity,
-                child: FilledButton.icon(
+                child: OutlinedButton.icon(
                   onPressed: () => _openContactSheet(),
                   icon: const Icon(Icons.add),
                   label: const Text('Add contact'),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                    side: BorderSide(
+                      color: theme.colorScheme.primary.withValues(alpha: 0.55),
+                    ),
+                  ),
                 ),
               ),
               const SizedBox(height: 14),
@@ -3414,12 +4225,16 @@ class _SettingsTab extends StatelessWidget {
     required this.autoVideoRecord,
     required this.autoVoiceRecord,
     required this.vibrationOnSos,
+    required this.hardwareSosShortcutEnabled,
+    required this.hardwareSosPermissionEnabled,
     required this.holdDuration,
     required this.onOpenBatteryOptimizationSettings,
     required this.onManageSubscription,
     required this.onAutoVideoRecordChanged,
     required this.onAutoVoiceRecordChanged,
     required this.onVibrationOnSosChanged,
+    required this.onOpenHardwareShortcutSettings,
+    required this.onHardwareSosShortcutChanged,
     required this.onHoldDurationChanged,
   });
 
@@ -3431,12 +4246,16 @@ class _SettingsTab extends StatelessWidget {
   final bool autoVideoRecord;
   final bool autoVoiceRecord;
   final bool vibrationOnSos;
+  final bool hardwareSosShortcutEnabled;
+  final bool hardwareSosPermissionEnabled;
   final int holdDuration;
   final Future<void> Function() onOpenBatteryOptimizationSettings;
   final Future<void> Function() onManageSubscription;
   final ValueChanged<bool> onAutoVideoRecordChanged;
   final ValueChanged<bool> onAutoVoiceRecordChanged;
   final ValueChanged<bool> onVibrationOnSosChanged;
+  final Future<void> Function() onOpenHardwareShortcutSettings;
+  final ValueChanged<bool> onHardwareSosShortcutChanged;
   final ValueChanged<int> onHoldDurationChanged;
 
   static final Uri _termsUri = Uri.parse(
@@ -3635,6 +4454,79 @@ class _SettingsTab extends StatelessWidget {
     }
   }
 
+  Future<void> _showThemeModeSheet(BuildContext context) async {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return ValueListenableBuilder<ThemeMode>(
+          valueListenable: themeModeController,
+          builder: (context, selectedMode, _) {
+            return SafeArea(
+              top: false,
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surface,
+                  borderRadius:
+                      const BorderRadius.vertical(top: Radius.circular(24)),
+                  border: Border.all(
+                    color: isDark
+                        ? const Color(0xFF2A2A2A)
+                        : const Color(0xFFE5E7EB),
+                  ),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 42,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: isDark
+                            ? const Color(0xFF3A3A3A)
+                            : const Color(0xFFD1D5DB),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    SegmentedButton<ThemeMode>(
+                      segments: const [
+                        ButtonSegment<ThemeMode>(
+                          value: ThemeMode.system,
+                          label: Text('System'),
+                          icon: Icon(Icons.settings_suggest_outlined),
+                        ),
+                        ButtonSegment<ThemeMode>(
+                          value: ThemeMode.light,
+                          label: Text('Light'),
+                          icon: Icon(Icons.light_mode_outlined),
+                        ),
+                        ButtonSegment<ThemeMode>(
+                          value: ThemeMode.dark,
+                          label: Text('Dark'),
+                          icon: Icon(Icons.dark_mode_outlined),
+                        ),
+                      ],
+                      selected: <ThemeMode>{selectedMode},
+                      onSelectionChanged: (selection) {
+                        themeModeController.value = selection.first;
+                      },
+                    ),
+                    const SizedBox(height: 14),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -3676,7 +4568,7 @@ class _SettingsTab extends StatelessWidget {
               _SettingsTile(
                 assetIconPath: 'assets/profile.png',
                 title: 'Manage subscription',
-                subtitle: 'Open secure checkout to upgrade your plan.',
+                subtitle: '',
                 onTap: () async {
                   await onManageSubscription();
                 },
@@ -3695,41 +4587,26 @@ class _SettingsTab extends StatelessWidget {
         _SurfaceCard(
           child: Column(
             children: [
-              const _SettingsTile(
-                assetIconPath: 'assets/night-mode.png',
-                title: 'Theme mode',
-                subtitle: '',
-              ),
-              const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                child: SegmentedButton<ThemeMode>(
-                  segments: const [
-                    ButtonSegment<ThemeMode>(
-                      value: ThemeMode.system,
-                      label: Text('System'),
-                      icon: Icon(Icons.settings_suggest_outlined),
-                    ),
-                    ButtonSegment<ThemeMode>(
-                      value: ThemeMode.light,
-                      label: Text('Light'),
-                      icon: Icon(Icons.light_mode_outlined),
-                    ),
-                    ButtonSegment<ThemeMode>(
-                      value: ThemeMode.dark,
-                      label: Text('Dark'),
-                      icon: Icon(Icons.dark_mode_outlined),
-                    ),
-                  ],
-                  selected: <ThemeMode>{themeModeController.value},
-                  onSelectionChanged: (selection) {
-                    themeModeController.value = selection.first;
-                  },
-                ),
+              ValueListenableBuilder<ThemeMode>(
+                valueListenable: themeModeController,
+                builder: (context, mode, _) {
+                  final subtitle = switch (mode) {
+                    ThemeMode.system => 'System',
+                    ThemeMode.light => 'Light',
+                    ThemeMode.dark => 'Dark',
+                  };
+
+                  return _SettingsTile(
+                    assetIconPath: 'assets/night-mode.png',
+                    title: 'Theme mode',
+                    subtitle: subtitle,
+                    onTap: () => _showThemeModeSheet(context),
+                  );
+                },
               ),
               const SizedBox(height: 10),
               _SettingsTile(
-                assetIconPath: 'assets/night-mode.png',
+                iconData: Icons.battery_saver_outlined,
                 title: 'Battery optimization',
                 subtitle: 'Disable it on Android for faster panic alerts.',
                 onTap: () async {
@@ -3738,7 +4615,7 @@ class _SettingsTab extends StatelessWidget {
               ),
               const SizedBox(height: 10),
               _SettingsTile(
-                assetIconPath: 'assets/night-mode.png',
+                iconData: Icons.phonelink_setup_outlined,
                 title: 'OEM background guide',
                 subtitle: 'Brand-specific autostart and battery steps.',
                 onTap: () {
@@ -3784,6 +4661,47 @@ class _SettingsTab extends StatelessWidget {
                 title: const Text(
                   'Vibration on SOS',
                   style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
+              const Divider(height: 1),
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                value: hardwareSosShortcutEnabled,
+                onChanged: onHardwareSosShortcutChanged,
+                title: const Text(
+                  'Volume down x3 shortcut',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+                subtitle: const Text(
+                  'Press volume down 3 times quickly to trigger SOS.',
+                ),
+              ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 2, bottom: 2),
+                  child: Text(
+                    hardwareSosPermissionEnabled
+                        ? 'Accessibility permission: Enabled'
+                        : 'Accessibility permission: Not enabled',
+                    style: TextStyle(
+                      color: hardwareSosPermissionEnabled
+                          ? const Color(0xFF16A34A)
+                          : Theme.of(context)
+                              .colorScheme
+                              .onSurface
+                              .withValues(alpha: 0.72),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: onOpenHardwareShortcutSettings,
+                  icon: const Icon(Icons.settings_accessibility_outlined),
+                  label: const Text('Enable in Android Accessibility settings'),
                 ),
               ),
               const SizedBox(height: 8),
@@ -3879,11 +4797,13 @@ class _SettingsTile extends StatelessWidget {
     required this.title,
     required this.subtitle,
     this.assetIconPath,
+    this.iconData,
     this.onTap,
     this.isDestructive = false,
   });
 
   final String? assetIconPath;
+  final IconData? iconData;
   final String title;
   final String subtitle;
   final VoidCallback? onTap;
@@ -3913,20 +4833,29 @@ class _SettingsTile extends StatelessWidget {
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Center(
-                  child: assetIconPath != null
-                      ? Image.asset(
-                          assetIconPath!,
-                          width: 21,
-                          height: 21,
-                          color: isDark ? Colors.white : null,
-                        )
-                      : Icon(
-                          Icons.circle,
-                          color: isDestructive
-                              ? const Color(0xFFE11D48)
-                              : theme.colorScheme.onSurface,
+                  child: iconData != null
+                      ? Icon(
+                          iconData,
+                          color: isDark
+                              ? Colors.white
+                              : theme.colorScheme.onSurface
+                                  .withValues(alpha: 0.85),
                           size: 21,
-                        ),
+                        )
+                      : assetIconPath != null
+                          ? Image.asset(
+                              assetIconPath!,
+                              width: 21,
+                              height: 21,
+                              color: isDark ? Colors.white : null,
+                            )
+                          : Icon(
+                              Icons.circle,
+                              color: isDestructive
+                                  ? const Color(0xFFE11D48)
+                                  : theme.colorScheme.onSurface,
+                              size: 21,
+                            ),
                 ),
               ),
               const SizedBox(width: 12),

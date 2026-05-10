@@ -295,26 +295,41 @@ class SosRecordingService {
       return;
     }
 
-    final cameras = await availableCameras();
-    final selectedCamera = cameras.firstWhere(
-      (camera) => camera.lensDirection == CameraLensDirection.back,
-      orElse: () => cameras.first,
-    );
-
-    final controller = CameraController(
-      selectedCamera,
-      ResolutionPreset.medium,
-      enableAudio: true,
-    );
-
-    await controller.initialize();
-    await controller.prepareForVideoRecording();
-    await controller.startVideoRecording();
-
-    _cameraController?.dispose();
-    _cameraController = controller;
+    // Set flag immediately to prevent concurrent calls from racing
     _videoRecordingActive = true;
-    _videoStartedAt = DateTime.now();
+
+    try {
+      final cameras = await availableCameras();
+      final selectedCamera = cameras.firstWhere(
+        (camera) => camera.lensDirection == CameraLensDirection.back,
+        orElse: () => cameras.first,
+      );
+
+      final controller = CameraController(
+        selectedCamera,
+        ResolutionPreset.medium,
+        enableAudio: true,
+      );
+
+      await controller.initialize();
+      await controller.prepareForVideoRecording();
+      await controller.startVideoRecording();
+
+      // Dispose the old controller only after the new one is fully ready
+      final oldController = _cameraController;
+      _cameraController = controller;
+      _videoStartedAt = DateTime.now();
+
+      // Dispose old controller after reassignment to avoid use-after-dispose
+      try {
+        await oldController?.dispose();
+      } catch (_) {
+        // Old controller may already be disposed; safe to ignore.
+      }
+    } catch (e) {
+      _videoRecordingActive = false;
+      rethrow;
+    }
   }
 
   Future<String?> stopAutoVideoRecording() async {
@@ -336,6 +351,32 @@ class SosRecordingService {
     _videoRecordingActive = false;
     _videoStartedAt = null;
     return pathValue;
+  }
+
+  /// Save an entry for a native (service-based) audio recording file.
+  Future<void> saveNativeAudioEntry(String filePath) async {
+    final db = await database;
+    await db.insert(
+      _table,
+      SosRecording(
+        userId: _currentUserId,
+        filePath: filePath,
+        startedAt: DateTime.now(),
+        stoppedAt: DateTime.now(),
+        isActive: false,
+      ).toMap()
+        ..remove('id'),
+    );
+  }
+
+  /// Save an entry for a native (service-based) video recording file.
+  Future<void> saveNativeVideoEntry(String filePath) async {
+    final db = await database;
+    await db.insert(_videoTable, {
+      'user_id': _currentUserId,
+      'file_path': filePath,
+      'created_at': DateTime.now().toIso8601String(),
+    });
   }
 
   Future<void> disposeRecorder() async {
