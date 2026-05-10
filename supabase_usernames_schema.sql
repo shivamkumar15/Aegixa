@@ -1,4 +1,3 @@
--- Run this in Supabase SQL editor before using username flow.
 
 create table if not exists public.usernames (
   uid text primary key,
