@@ -1,4 +1,4 @@
-# Aegixa — Guardian Safety App
+# Aegixa — 
 
 <p align="center">
   <img src="assets/Logo.png" alt="Aegixa Logo" width="120" height="120">
@@ -17,7 +17,7 @@
 
 ---
 
-## 🌟 Why Aegixa?
+##  Why Aegixa?
 
 In critical moments, speed and reliability are everything. Traditional safety apps often fail because they require too many steps to activate or are silenced by aggressive battery management. 
 
@@ -28,28 +28,28 @@ In critical moments, speed and reliability are everything. Traditional safety ap
 
 ---
 
-## 🚀 Overview
+##  Overview
 
 Aegixa is a high-performance personal safety application built with Flutter. It combines real-time location sharing with automated media evidence capture, providing a comprehensive safety net for individuals in vulnerable situations.
 
-## ✨ Key Features
+##  Key Features
 
-### 🚨 High-Priority SOS
+###  High-Priority SOS
 - **Hold-to-Activate:** Prevents accidental triggers while allowing for rapid dispatch under stress.
 - **System-Level Overlays:** On Android, incoming panic alerts trigger a modal that appears over any active application.
 - **Full-Screen Intents:** Critical alerts wake the device and present a full-screen response UI.
 
-### 📍 Real-Time "Guardian" Tracking
+###  Real-Time "Guardian" Tracking
 - **Live Location Sharing:** Continuous GPS updates shared via Supabase Realtime during active sessions.
 - **Panic Inbox:** A centralized hub for recipients to manage multiple incoming alerts, view live maps, and access emergency media.
 
-### 📁 Smart Evidence Management
+###  Smart Evidence Management
 - **Automated Media Capture:** Begins voice/video recording immediately upon SOS activation.
 - **Privacy-First Cleanup:** Recipients download media locally to their devices; once confirmed, remote files are purged from Supabase to maintain user privacy.
 
 ---
 
-## 🔬 Technical Deep Dive
+## Technical Deep Dive
 
 ### The SOS Lifecycle
 1. **Trigger**: User holds the SOS button.
@@ -63,26 +63,3 @@ Aegixa includes specialized **OEM Battery Guidance**. Since brands like Xiaomi a
 
 ---
 
-## 🛠️ Technical Stack
-
-- **Frontend:** [Flutter](https://flutter.dev/) & [Dart](https://dart.dev/)
-- **Authentication:** [Firebase Auth](https://firebase.google.com/docs/auth)
-- **Database & Storage:** [Supabase](https://supabase.com/) (PostgreSQL + Realtime + Storage)
-- **Push Notifications:** [Firebase Cloud Messaging (FCM)](https://firebase.google.com/docs/cloud-messaging)
-- **Payments:** [RevenueCat](https://www.revenuecat.com/) for premium safety tiers.
-
-## 📂 Project Structure
-
-```bash
-lib/
-├── screens/    # UI for Home, SOS Inbox, Panic Overlays, etc.
-├── services/   # SOS Logic, Panic Alerts (Overlays), Media, and Push.
-├── utils/      # Auth validators and device helpers.
-└── main.dart   # App entry point.
-```
-
----
-
-<p align="center">
-  Built with ❤️ for a safer world.
-</p>
