@@ -1,4 +1,4 @@
-# Aegixa — 
+# Aegixa 
 
 <p align="center">
   <img src="assets/Logo.png" alt="Aegixa Logo" width="120" height="120">
