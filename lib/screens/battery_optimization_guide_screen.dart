@@ -156,28 +156,34 @@ class _BatteryOptimizationGuideScreenState
     final detected = _detectedMatcher;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Battery & autostart guide')),
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        title: const Text('Battery & autostart guide'),
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        elevation: 0,
+      ),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
           Container(
             padding: const EdgeInsets.all(18),
             decoration: BoxDecoration(
-              color: theme.colorScheme.primary.withValues(alpha: 0.08),
+              color: const Color(0xFF1A1A1A),
               borderRadius: BorderRadius.circular(22),
               border: Border.all(
-                color: theme.colorScheme.primary.withValues(alpha: 0.2),
+                color: const Color(0xFF333333),
               ),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
+                const Text(
                   'Why this matters',
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w800,
-                    color: theme.colorScheme.onSurface,
+                    color: Colors.white,
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -185,11 +191,9 @@ class _BatteryOptimizationGuideScreenState
                   detected == null
                       ? 'Many Android brands delay emergency notifications unless the app is allowed to auto start and run without battery restrictions. Use the steps below for your phone brand.'
                       : 'Aegixa detected ${_detectedLabel ?? 'your Android device'} and moved the most relevant guide to the top. Review that section first, then use the battery settings shortcut below.',
-                  style: TextStyle(
+                  style: const TextStyle(
                     height: 1.45,
-                    color: isDark
-                        ? const Color(0xFFD4D4D8)
-                        : const Color(0xFF4B5563),
+                    color: Color(0xFFA3A3A3),
                   ),
                 ),
                 if (Platform.isAndroid) ...[
@@ -198,13 +202,18 @@ class _BatteryOptimizationGuideScreenState
                     spacing: 10,
                     runSpacing: 10,
                     children: [
-                      FilledButton.icon(
+                      ElevatedButton.icon(
                         onPressed: () async {
                           await DeviceSettingsService
                               .openBatteryOptimizationSettings();
                         },
                         icon: const Icon(Icons.battery_alert_outlined),
                         label: const Text('Battery settings'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          foregroundColor: Colors.black,
+                          elevation: 0,
+                        ),
                       ),
                       OutlinedButton.icon(
                         onPressed: () async {
@@ -212,6 +221,10 @@ class _BatteryOptimizationGuideScreenState
                         },
                         icon: const Icon(Icons.settings_outlined),
                         label: const Text('App settings'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          side: const BorderSide(color: Colors.white24),
+                        ),
                       ),
                     ],
                   ),
@@ -253,23 +266,14 @@ class _GuideCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
+        color: const Color(0xFF121212),
         borderRadius: BorderRadius.circular(22),
         border: Border.all(
           color: isRecommended
-              ? theme.colorScheme.primary.withValues(alpha: 0.65)
-              : (isDark ? const Color(0xFF2A2A2A) : const Color(0xFFE5E7EB)),
+              ? const Color(0xFF4ADE80).withValues(alpha: 0.5)
+              : const Color(0xFF222222),
           width: isRecommended ? 1.4 : 1,
         ),
-        boxShadow: isRecommended
-            ? [
-                BoxShadow(
-                  color: theme.colorScheme.primary.withValues(alpha: 0.12),
-                  blurRadius: 20,
-                  offset: const Offset(0, 8),
-                ),
-              ]
-            : null,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -280,10 +284,10 @@ class _GuideCard extends StatelessWidget {
                 width: 44,
                 height: 44,
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.primary.withValues(alpha: 0.12),
+                  color: Colors.white.withValues(alpha: 0.05),
                   borderRadius: BorderRadius.circular(14),
                 ),
-                child: Icon(section.icon, color: theme.colorScheme.primary),
+                child: Icon(section.icon, color: Colors.white),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -298,27 +302,26 @@ class _GuideCard extends StatelessWidget {
                           vertical: 5,
                         ),
                         decoration: BoxDecoration(
-                          color:
-                              theme.colorScheme.primary.withValues(alpha: 0.12),
+                          color: const Color(0xFF14532D).withValues(alpha: 0.3),
                           borderRadius: BorderRadius.circular(999),
                         ),
                         child: Text(
                           detectedLabel == null
                               ? 'Recommended for this device'
                               : 'Recommended for $detectedLabel',
-                          style: TextStyle(
+                          style: const TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w800,
-                            color: theme.colorScheme.primary,
+                            color: Color(0xFF4ADE80),
                           ),
                         ),
                       ),
                     Text(
                       section.brand,
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 17,
                         fontWeight: FontWeight.w800,
-                        color: theme.colorScheme.onSurface,
+                        color: Colors.white,
                       ),
                     ),
                   ],
@@ -356,14 +359,14 @@ class _GuideStep extends StatelessWidget {
           height: 26,
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: theme.colorScheme.primary.withValues(alpha: 0.12),
+            color: Colors.white.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(999),
           ),
           child: Text(
             '$index',
-            style: TextStyle(
+            style: const TextStyle(
               fontWeight: FontWeight.w800,
-              color: theme.colorScheme.primary,
+              color: Colors.white,
             ),
           ),
         ),
@@ -371,9 +374,9 @@ class _GuideStep extends StatelessWidget {
         Expanded(
           child: Text(
             text,
-            style: TextStyle(
+            style: const TextStyle(
               height: 1.45,
-              color: isDark ? const Color(0xFFE5E7EB) : const Color(0xFF374151),
+              color: Color(0xFFE5E7EB),
             ),
           ),
         ),

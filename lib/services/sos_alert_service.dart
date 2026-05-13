@@ -5,7 +5,6 @@ import 'dart:math';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -474,8 +473,6 @@ class SosAlertService {
             'alertId': row['id'],
             'sessionId': row['session_id'],
             'recipientUserId': row['recipient_user_id'],
-            'senderName': row['sender_name'],
-            'alertMessage': row['alert_message'],
           },
         )
         .toList();
@@ -549,7 +546,7 @@ class SosAlertService {
           fileOptions: const FileOptions(upsert: true),
         );
 
-    return _supabase.storage.from(_recordingsBucket).getPublicUrl(objectPath);
+    return objectPath;
   }
 
   Future<String> _saveMediaToDevice({
@@ -568,23 +565,22 @@ class SosAlertService {
       return existingPath;
     }
 
-    final normalizedUrl = (remoteUrl ?? '').trim();
-    if (normalizedUrl.isEmpty) {
+    final remoteReference = (remoteUrl ?? '').trim();
+    if (remoteReference.isEmpty) {
       throw StateError(fileMissingMessage);
     }
 
-    // SECURITY: Validate the URL to prevent SSRF attacks.
-    // Only allow HTTPS URLs from our own Supabase storage domain.
-    final uri = Uri.tryParse(normalizedUrl);
-    if (uri == null ||
-        !uri.hasScheme ||
-        uri.scheme != 'https' ||
-        !uri.host.endsWith('.supabase.co')) {
-      throw StateError('Invalid or untrusted media URL');
+    final objectPath = _trustedStorageObjectPath(alert, remoteReference);
+    if (objectPath == null) {
+      throw StateError('Invalid or untrusted media reference');
     }
 
-    final response = await http.get(uri);
-    if (response.statusCode < 200 || response.statusCode >= 300) {
+    late final List<int> mediaBytes;
+    try {
+      mediaBytes = await _supabase.storage
+          .from(_recordingsBucket)
+          .download(objectPath);
+    } catch (_) {
       throw StateError(downloadFailureMessage);
     }
 
@@ -593,18 +589,18 @@ class SosAlertService {
     );
     await mediaDirectory.create(recursive: true);
 
-    final extension = _resolveDownloadedRecordingExtension(normalizedUrl);
+    final extension = _resolveDownloadedRecordingExtension(objectPath);
     final filePath = path.join(
       mediaDirectory.path,
       '${filePrefix}_${alert.sessionId}_${alert.id}$extension',
     );
     final file = File(filePath);
-    await file.writeAsBytes(response.bodyBytes, flush: true);
+    await file.writeAsBytes(mediaBytes, flush: true);
 
     final savedPaths = await _loadDownloadedMediaPaths(prefsKey);
     savedPaths['${alert.id}'] = file.path;
     await _saveDownloadedMediaPaths(prefsKey, savedPaths);
-    await _cleanupRemoteMedia(alert, normalizedUrl, remoteColumn);
+    await _cleanupRemoteMedia(alert, remoteReference, remoteColumn);
     return file.path;
   }
 
@@ -658,12 +654,44 @@ class SosAlertService {
     return '.m4a';
   }
 
-  String? _extractStorageObjectPath(String remoteUrl) {
-    if (remoteUrl.isEmpty) {
+  String? _trustedStorageObjectPath(SosAlert alert, String remoteReference) {
+    final objectPath = _extractStorageObjectPath(remoteReference);
+    if ((objectPath ?? '').isEmpty) {
       return null;
     }
-    final uri = Uri.tryParse(remoteUrl);
+
+    final expectedPrefix = '${alert.senderUserId}/${alert.sessionId}/';
+    if (!objectPath!.startsWith(expectedPrefix)) {
+      return null;
+    }
+
+    final segments = objectPath.split('/');
+    if (segments.any((segment) => segment.isEmpty || segment == '..')) {
+      return null;
+    }
+
+    return objectPath;
+  }
+
+  String? _extractStorageObjectPath(String remoteReference) {
+    if (remoteReference.isEmpty) {
+      return null;
+    }
+
+    final uri = Uri.tryParse(remoteReference);
     if (uri == null) {
+      return null;
+    }
+
+    if (!uri.hasScheme) {
+      final normalized = path.posix.normalize(remoteReference);
+      if (normalized.startsWith('../') || normalized.startsWith('/')) {
+        return null;
+      }
+      return normalized;
+    }
+
+    if (uri.scheme != 'https' || !uri.host.endsWith('.supabase.co')) {
       return null;
     }
 

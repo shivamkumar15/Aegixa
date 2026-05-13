@@ -10,6 +10,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'battery_optimization_guide_screen.dart';
 import '../services/device_settings_service.dart';
 
+import '../ui_components.dart';
+
 class AppPermissionsScreen extends StatefulWidget {
   const AppPermissionsScreen({super.key, required this.onCompleted});
 
@@ -197,108 +199,101 @@ class _AppPermissionsScreenState extends State<AppPermissionsScreen>
     final isDark = theme.brightness == Brightness.dark;
 
     return Scaffold(
-      backgroundColor: isDark ? Colors.black : const Color(0xFFF8FAFC),
+      backgroundColor: Colors.black,
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
           child: _isChecking
-              ? Center(
-                  child: CircularProgressIndicator(
-                    color: theme.colorScheme.primary,
-                  ),
+              ? const Center(
+                  child: AegixaLoader(),
                 )
               : ListView(
                   children: [
-                    Container(
-                      width: 68,
-                      height: 68,
-                      decoration: BoxDecoration(
-                        color:
-                            theme.colorScheme.primary.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(22),
-                      ),
-                      child: Icon(
-                        Icons.shield_outlined,
-                        size: 34,
-                        color: theme.colorScheme.primary,
+                    Center(
+                      child: Image.asset(
+                        'assets/Logo.png',
+                        height: 100,
+                        fit: BoxFit.contain,
                       ),
                     ),
                     const SizedBox(height: 24),
-                    Text(
+                    const Text(
                       'Enable core permissions',
                       style: TextStyle(
-                        fontSize: 30,
+                        fontSize: 28,
                         fontWeight: FontWeight.w800,
-                        color: theme.colorScheme.onSurface,
+                        color: Colors.white,
                       ),
                     ),
-                    const SizedBox(height: 10),
-                    Text(
+                    const SizedBox(height: 12),
+                    const Text(
                       'Aegixa needs location, microphone, camera, notification, and overlay access from the start so SOS, live tracking, emergency evidence, and panic alerts work instantly.',
                       style: TextStyle(
                         fontSize: 15,
-                        height: 1.5,
-                        color: isDark
-                            ? const Color(0xFFA3A3A3)
-                            : const Color(0xFF6B7280),
+                        height: 1.6,
+                        color: Color(0xFFA3A3A3),
                       ),
                     ),
                     if (Platform.isAndroid) ...[
                       const SizedBox(height: 18),
                       Container(
                         width: double.infinity,
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color:
-                              theme.colorScheme.primary.withValues(alpha: 0.08),
-                          borderRadius: BorderRadius.circular(18),
-                          border: Border.all(
-                            color: theme.colorScheme.primary
-                                .withValues(alpha: 0.22),
-                          ),
-                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 8),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
+                            const Text(
                               'Battery optimization can block emergency alerts',
                               style: TextStyle(
+                                fontSize: 16,
                                 fontWeight: FontWeight.w800,
-                                color: theme.colorScheme.onSurface,
+                                color: Colors.white,
                               ),
                             ),
                             const SizedBox(height: 8),
-                            Text(
+                            const Text(
                               'On many Android phones, panic notifications can be delayed unless Aegixa is excluded from battery optimization.',
                               style: TextStyle(
                                 height: 1.45,
-                                color: isDark
-                                    ? const Color(0xFFD4D4D8)
-                                    : const Color(0xFF4B5563),
+                                color: Color(0xFFA3A3A3),
                               ),
                             ),
-                            const SizedBox(height: 12),
-                            OutlinedButton.icon(
-                              onPressed: () async {
-                                await DeviceSettingsService
-                                    .openBatteryOptimizationSettings();
-                              },
-                              icon: const Icon(Icons.battery_alert_outlined),
-                              label: const Text('Open battery settings'),
-                            ),
-                            const SizedBox(height: 10),
-                            TextButton(
-                              onPressed: () {
-                                Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) =>
-                                        const BatteryOptimizationGuideScreen(),
+                            const SizedBox(height: 16),
+                            Row(
+                              children: [
+                                OutlinedButton.icon(
+                                  onPressed: () async {
+                                    await DeviceSettingsService
+                                        .openBatteryOptimizationSettings();
+                                  },
+                                  icon: const Icon(Icons.battery_alert_outlined),
+                                  label: const Text('Open battery settings'),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: Colors.white,
+                                    side: const BorderSide(color: Colors.white24),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
                                   ),
-                                );
-                              },
-                              child: const Text(
-                                'View brand-specific instructions',
-                              ),
+                                ),
+                                const SizedBox(width: 12),
+                                TextButton(
+                                  onPressed: () {
+                                    Navigator.of(context).push(
+                                      MaterialPageRoute(
+                                        builder: (_) =>
+                                            const BatteryOptimizationGuideScreen(),
+                                      ),
+                                    );
+                                  },
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: Colors.white70,
+                                  ),
+                                  child: const Text(
+                                    'Guide',
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),
@@ -346,43 +341,20 @@ class _AppPermissionsScreenState extends State<AppPermissionsScreen>
                       isGranted: _overlayGranted,
                     ),
                     const SizedBox(height: 20),
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: isDark
-                            ? const Color(0xFF101010)
-                            : const Color(0xFFF3F4F6),
-                        borderRadius: BorderRadius.circular(18),
-                        border: Border.all(
-                          color: isDark
-                              ? const Color(0xFF2A2A2A)
-                              : const Color(0xFFE5E7EB),
-                        ),
-                      ),
-                      child: Text(
-                        'You only need to do this once after installation. If you deny a permission permanently, Aegixa will open app settings so you can enable it. On Android, also disable battery optimization for the most reliable emergency alerts.',
-                        style: TextStyle(
-                          color: isDark
-                              ? const Color(0xFFA3A3A3)
-                              : const Color(0xFF6B7280),
-                          height: 1.45,
-                        ),
-                      ),
-                    ),
                     const SizedBox(height: 16),
                     SizedBox(
                       width: double.infinity,
-                      height: 54,
+                      height: 56,
                       child: ElevatedButton(
                         onPressed:
                             _isSubmitting ? null : _requestAllPermissions,
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: theme.colorScheme.primary,
-                          foregroundColor: Colors.white,
+                          backgroundColor: Colors.white,
+                          foregroundColor: Colors.black,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(18),
                           ),
+                          elevation: 0,
                         ),
                         child: _isSubmitting
                             ? const SizedBox(
@@ -390,14 +362,14 @@ class _AppPermissionsScreenState extends State<AppPermissionsScreen>
                                 height: 20,
                                 child: CircularProgressIndicator(
                                   strokeWidth: 2,
-                                  color: Colors.white,
+                                  color: Colors.black,
                                 ),
                               )
                             : const Text(
                                 'Allow Permissions',
                                 style: TextStyle(
                                   fontSize: 16,
-                                  fontWeight: FontWeight.w700,
+                                  fontWeight: FontWeight.w800,
                                 ),
                               ),
                       ),
@@ -428,53 +400,54 @@ class _PermissionStatusTile extends StatelessWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(
-          color: isDark ? const Color(0xFF2A2A2A) : const Color(0xFFE5E7EB),
-        ),
-      ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 48,
-            height: 48,
+            width: 60,
+            height: 28,
+            alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: isGranted
-                  ? const Color(0xFFDCFCE7)
-                  : theme.colorScheme.primary.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(14),
+              color: isGranted ? Colors.pink : Colors.white.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(6),
             ),
-            child: Icon(
-              isGranted ? Icons.check_rounded : icon,
-              color: isGranted
-                  ? const Color(0xFF15803D)
-                  : theme.colorScheme.primary,
-            ),
+            child: isGranted
+                ? const Text(
+                    'DONE',
+                    style: TextStyle(
+                      color: Colors.black,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.5,
+                    ),
+                  )
+                : Icon(
+                    icon,
+                    color: Colors.white70,
+                    size: 18,
+                  ),
           ),
-          const SizedBox(width: 14),
+          const SizedBox(width: 16),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   title,
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
-                    color: theme.colorScheme.onSurface,
+                    color: Colors.white,
                   ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   subtitle,
-                  style: TextStyle(
-                    color: isDark
-                        ? const Color(0xFFA3A3A3)
-                        : const Color(0xFF6B7280),
+                  style: const TextStyle(
+                    color: Color(0xFFA3A3A3),
+                    fontSize: 13,
                     height: 1.4,
                   ),
                 ),

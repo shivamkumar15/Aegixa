@@ -8,6 +8,7 @@ import '../services/auth_service.dart';
 import '../ui_components.dart';
 import '../utils/auth_validators.dart';
 import 'login_screen.dart';
+import 'phone_auth_screen.dart';
 
 class SignUpScreen extends StatefulWidget {
   const SignUpScreen({super.key});
@@ -173,227 +174,229 @@ class _SignUpScreenState extends State<SignUpScreen> {
         AuthValidators.passwordRules(_passwordController.text);
 
     return Scaffold(
+      backgroundColor:
+          isDark ? const Color(0xFF000000) : const Color(0xFFF8FAFC),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        automaticallyImplyLeading: false,
+      ),
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 440),
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Center(
-                      child: Image.asset(
-                        'assets/Logo.png',
-                        width: 120,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 28),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  const SizedBox(height: 0),
+                  // Logo
+                  Hero(
+                    tag: 'app_logo',
+                    child: Image.asset(
+                      'assets/Logo.png',
+                      width: 200,
+                      height: 200,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  // Title
+                  Text(
+                    'Create Account',
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w800,
+                      color: isDark ? Colors.white : const Color(0xFF1E293B),
+                      letterSpacing: -0.5,
+                    ),
+                  ),
+                  const SizedBox(height: 15),
+
+                  // Email Field
+                  buildRoundedTextField(
+                    context: context,
+                    controller: _emailController,
+                    hint: 'Email address',
+                    icon: Icons.email_outlined,
+                    isDark: isDark,
+                    validator: AuthValidators.validateEmail,
+                    keyboardType: TextInputType.emailAddress,
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Password Field
+                  buildRoundedTextField(
+                    context: context,
+                    controller: _passwordController,
+                    hint: 'Password',
+                    icon: Icons.lock_outline,
+                    isDark: isDark,
+                    obscure: _obscurePassword,
+                    validator: (value) =>
+                        (value ?? '').isEmpty ? 'Password is required' : null,
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _obscurePassword
+                            ? Icons.visibility_outlined
+                            : Icons.visibility_off_outlined,
+                        color: isDark ? Colors.white54 : Colors.grey[400],
+                        size: 20,
                       ),
+                      onPressed: () =>
+                          setState(() => _obscurePassword = !_obscurePassword),
                     ),
-                    const SizedBox(height: 18),
-                    Center(
-                      child: Text(
-                        'Create account',
-                        style: TextStyle(
-                          fontSize: 30,
-                          fontWeight: FontWeight.bold,
-                          color: theme.colorScheme.onSurface,
-                          letterSpacing: -1,
-                        ),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Confirm Password Field
+                  buildRoundedTextField(
+                    context: context,
+                    controller: _confirmPasswordController,
+                    hint: 'Confirm password',
+                    icon: Icons.lock_outline,
+                    isDark: isDark,
+                    obscure: _obscureConfirmPassword,
+                    validator: (value) => (value ?? '').isEmpty
+                        ? 'Confirm password is required'
+                        : null,
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _obscureConfirmPassword
+                            ? Icons.visibility_outlined
+                            : Icons.visibility_off_outlined,
+                        color: isDark ? Colors.white54 : Colors.grey[400],
+                        size: 20,
                       ),
+                      onPressed: () => setState(() =>
+                          _obscureConfirmPassword = !_obscureConfirmPassword),
                     ),
-                    const SizedBox(height: 6),
-                    const SizedBox(height: 26),
-                    buildTextField(
-                      context: context,
-                      label: 'Email address',
-                      hint: 'name@example.com',
-                      controller: _emailController,
-                      keyboardType: TextInputType.emailAddress,
-                      validator: AuthValidators.validateEmail,
-                    ),
-                    const SizedBox(height: 16),
-                    buildTextField(
-                      context: context,
-                      label: 'Password',
-                      hint: '••••••••',
-                      controller: _passwordController,
-                      obscure: _obscurePassword,
-                      suffixIcon: IconButton(
-                        icon: Icon(
-                          _obscurePassword
-                              ? Icons.visibility_off
-                              : Icons.visibility,
-                          color: isDark
-                              ? const Color(0xFFB3B3B3)
-                              : const Color(0xFF9CA3AF),
-                        ),
-                        onPressed: () {
-                          setState(() {
-                            _obscurePassword = !_obscurePassword;
-                          });
-                        },
-                      ),
-                      validator: (value) {
-                        if ((value ?? '').isEmpty) {
-                          return 'Password is required';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 16),
-                    buildTextField(
-                      context: context,
-                      label: 'Confirm password',
-                      hint: '••••••••',
-                      controller: _confirmPasswordController,
-                      obscure: _obscureConfirmPassword,
-                      suffixIcon: IconButton(
-                        icon: Icon(
-                          _obscureConfirmPassword
-                              ? Icons.visibility_off
-                              : Icons.visibility,
-                          color: isDark
-                              ? const Color(0xFFB3B3B3)
-                              : const Color(0xFF9CA3AF),
-                        ),
-                        onPressed: () {
-                          setState(() {
-                            _obscureConfirmPassword = !_obscureConfirmPassword;
-                          });
-                        },
-                      ),
-                      validator: (value) {
-                        if ((value ?? '').isEmpty) {
-                          return 'Confirm password is required';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    Wrap(
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // Password Rules
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Wrap(
                       spacing: 8,
                       runSpacing: 8,
                       children: [
                         _PasswordRuleChip(
-                          label: '8+ characters',
-                          isMet: passwordRules.minLength,
-                        ),
+                            label: '8+ chars', isMet: passwordRules.minLength),
                         _PasswordRuleChip(
-                          label: 'Max 128 characters',
-                          isMet: passwordRules.maxLength,
-                        ),
+                            label: 'Number', isMet: passwordRules.hasNumber),
                         _PasswordRuleChip(
-                          label: 'Uppercase letter',
-                          isMet: passwordRules.hasUppercase,
-                        ),
-                        _PasswordRuleChip(
-                          label: 'Lowercase letter',
-                          isMet: passwordRules.hasLowercase,
-                        ),
-                        _PasswordRuleChip(
-                          label: 'Number',
-                          isMet: passwordRules.hasNumber,
-                        ),
-                        _PasswordRuleChip(
-                          label: 'Special character',
-                          isMet: passwordRules.hasSpecial,
-                        ),
+                            label: 'Special', isMet: passwordRules.hasSpecial),
                       ],
                     ),
-                    const SizedBox(height: 24),
-                    buildButton(
-                      context: context,
-                      label: 'Sign up with email',
-                      isLoading: _loadingProvider == 'email',
-                      onPressed: _isLoading ? null : _signUpWithEmail,
-                    ),
-                    const SizedBox(height: 18),
-                    Row(
-                      children: [
-                        Expanded(
+                  ),
+
+                  const SizedBox(height: 30),
+
+                  // Sign Up Button
+                  buildPrimaryButton(
+                    context: context,
+                    label: 'Sign Up',
+                    onPressed: _isLoading ? null : _signUpWithEmail,
+                    isLoading: _loadingProvider == 'email',
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // Or login with
+                  Row(
+                    children: [
+                      Expanded(
                           child: Divider(
-                            color: isDark
-                                ? const Color(0xFF2A2A2A)
-                                : const Color(0xFFE5E7EB),
+                              color:
+                                  isDark ? Colors.white10 : Colors.grey[300])),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: Text(
+                          'Or Sign up with',
+                          style: TextStyle(
+                            color: isDark ? Colors.white38 : Colors.grey[500],
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
-                        const Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 12),
-                          child: Text(
-                            'OR',
-                            style: TextStyle(
-                              color: Color(0xFFA3A3A3),
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                        Expanded(
+                      ),
+                      Expanded(
                           child: Divider(
-                            color: isDark
-                                ? const Color(0xFF2A2A2A)
-                                : const Color(0xFFE5E7EB),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 18),
-                    buildButton(
-                      context: context,
-                      label: 'Continue with Google',
-                      isOutlined: true,
-                      isLoading: _loadingProvider == 'google',
-                      onPressed: _isLoading ? null : _signInWithGoogle,
-                    ),
-                    if (isIOS) ...[
-                      const SizedBox(height: 10),
-                      buildButton(
+                              color:
+                                  isDark ? Colors.white10 : Colors.grey[300])),
+                    ],
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Social Buttons Row
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      buildSocialIcon(
                         context: context,
-                        label: 'Continue with Apple',
-                        isOutlined: true,
-                        icon: Icon(
-                          Icons.apple,
-                          color: theme.colorScheme.onSurface,
-                          size: 22,
+                        icon: Icons.phone_android_rounded,
+                        onPressed: _isLoading
+                            ? null
+                            : () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                      builder: (_) => const PhoneAuthScreen()),
+                                ),
+                        isDark: isDark,
+                      ),
+                      const SizedBox(width: 20),
+                      buildSocialIcon(
+                        context: context,
+                        icon: Icons.g_mobiledata_rounded,
+                        size: 40,
+                        onPressed: _isLoading ? null : _signInWithGoogle,
+                        isDark: isDark,
+                        isLoading: _loadingProvider == 'google',
+                      ),
+                      if (isIOS) ...[
+                        const SizedBox(width: 20),
+                        buildSocialIcon(
+                          context: context,
+                          icon: Icons.apple_rounded,
+                          onPressed: _isLoading ? null : _signInWithApple,
+                          isDark: isDark,
+                          isLoading: _loadingProvider == 'apple',
                         ),
-                        isLoading: _loadingProvider == 'apple',
-                        onPressed: _isLoading ? null : _signInWithApple,
+                      ],
+                    ],
+                  ),
+
+                  const SizedBox(height: 15),
+
+                  // Log in link
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        "Already have an account? ",
+                        style: TextStyle(
+                          color: isDark ? Colors.white70 : Colors.grey[600],
+                          fontSize: 15,
+                        ),
+                      ),
+                      GestureDetector(
+                        onTap: () => Navigator.pop(context),
+                        child: Text(
+                          'Log in',
+                          style: TextStyle(
+                            color: theme.colorScheme.primary,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 15,
+                          ),
+                        ),
                       ),
                     ],
-                    const SizedBox(height: 22),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          'Already have an account?',
-                          style: TextStyle(
-                            color: isDark
-                                ? const Color(0xFFA3A3A3)
-                                : const Color(0xFF6B7280),
-                          ),
-                        ),
-                        TextButton(
-                          onPressed: _isLoading
-                              ? null
-                              : () => Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (_) => const LoginScreen(),
-                                    ),
-                                  ),
-                          child: Text(
-                            'Log in',
-                            style: TextStyle(
-                              color: theme.colorScheme.primary,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(height: 30),
+                ],
               ),
             ),
           ),
@@ -417,26 +420,30 @@ class _PasswordRuleChip extends StatelessWidget {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 180),
       curve: Curves.easeOut,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: isMet
-            ? theme.colorScheme.primary.withValues(alpha: 0.18)
+            ? theme.colorScheme.primary
             : (isDark ? const Color(0xFF171717) : const Color(0xFFF3F4F6)),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: isMet
-              ? theme.colorScheme.primary.withValues(alpha: 0.55)
-              : (isDark ? const Color(0xFF2A2A2A) : const Color(0xFFE5E7EB)),
-        ),
+        boxShadow: isMet
+            ? [
+                BoxShadow(
+                  color: theme.colorScheme.primary.withOpacity(0.3),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                )
+              ]
+            : null,
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(
-            isMet ? Icons.check_circle : Icons.radio_button_unchecked,
+            isMet ? Icons.check_circle_rounded : Icons.radio_button_unchecked,
             size: 14,
             color: isMet
-                ? theme.colorScheme.primary
+                ? Colors.black
                 : (isDark ? const Color(0xFFA3A3A3) : const Color(0xFF6B7280)),
           ),
           const SizedBox(width: 6),
@@ -444,12 +451,10 @@ class _PasswordRuleChip extends StatelessWidget {
             label,
             style: TextStyle(
               fontSize: 12,
-              fontWeight: FontWeight.w600,
+              fontWeight: FontWeight.w700,
               color: isMet
-                  ? theme.colorScheme.primary
-                  : (isDark
-                      ? const Color(0xFFD1D5DB)
-                      : const Color(0xFF4B5563)),
+                  ? Colors.black
+                  : (isDark ? const Color(0xFFD1D5DB) : const Color(0xFF4B5563)),
             ),
           ),
         ],

@@ -254,3 +254,302 @@ Widget buildButton({
     ),
   );
 }
+Widget buildRoundedTextField({
+  required BuildContext context,
+  required TextEditingController controller,
+  required String hint,
+  bool isDark = false,
+  IconData? icon,
+  bool obscure = false,
+  Widget? suffixIcon,
+  Widget? prefixIcon,
+  String? Function(String?)? validator,
+  TextInputType keyboardType = TextInputType.text,
+}) {
+  final isDark = Theme.of(context).brightness == Brightness.dark;
+  return TextFormField(
+    controller: controller,
+    obscureText: obscure,
+    validator: validator,
+    keyboardType: keyboardType,
+    style: TextStyle(color: isDark ? Colors.white : Colors.black),
+    decoration: InputDecoration(
+      hintText: hint,
+      hintStyle: TextStyle(color: isDark ? Colors.white38 : Colors.grey[400]),
+      prefixIcon: prefixIcon ?? (icon != null ? Icon(icon, color: isDark ? Colors.white54 : Colors.grey[400], size: 22) : null),
+      suffixIcon: suffixIcon,
+      filled: true,
+      fillColor: isDark ? const Color(0xFF1E1E1E) : const Color(0xFFF1F5F9),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(30),
+        borderSide: BorderSide.none,
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(30),
+        borderSide: BorderSide.none,
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(30),
+        borderSide: BorderSide(color: Theme.of(context).colorScheme.primary, width: 1.5),
+      ),
+      errorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(30),
+        borderSide: const BorderSide(color: Colors.red, width: 1),
+      ),
+      focusedErrorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(30),
+        borderSide: const BorderSide(color: Colors.red, width: 1.5),
+      ),
+    ),
+  );
+}
+
+Widget buildPrimaryButton({
+  required BuildContext context,
+  required String label,
+  required VoidCallback? onPressed,
+  required bool isLoading,
+}) {
+  final theme = Theme.of(context);
+  return Container(
+    width: double.infinity,
+    height: 58,
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(30),
+      gradient: LinearGradient(
+        colors: [
+          theme.colorScheme.primary,
+          theme.colorScheme.primary.withOpacity(0.8),
+        ],
+      ),
+      boxShadow: [
+        BoxShadow(
+          color: theme.colorScheme.primary.withOpacity(0.3),
+          blurRadius: 12,
+          offset: const Offset(0, 6),
+        ),
+      ],
+    ),
+    child: ElevatedButton(
+      onPressed: onPressed,
+      style: ElevatedButton.styleFrom(
+        backgroundColor: Colors.transparent,
+        shadowColor: Colors.transparent,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+      ),
+      child: isLoading
+          ? const SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
+            )
+          : Text(
+              label,
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+    ),
+  );
+}
+
+Widget buildSocialIcon({
+  required BuildContext context,
+  required IconData icon,
+  required VoidCallback? onPressed,
+  required bool isDark,
+  bool isLoading = false,
+  double size = 28,
+}) {
+  return Container(
+    width: 64,
+    height: 64,
+    decoration: BoxDecoration(
+      shape: BoxShape.circle,
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withOpacity(0.05),
+          blurRadius: 10,
+          offset: const Offset(0, 4),
+        ),
+      ],
+      border: Border.all(
+        color: isDark ? Colors.white10 : Colors.grey[200]!,
+        width: 1,
+      ),
+    ),
+    child: InkWell(
+      onTap: onPressed,
+      borderRadius: BorderRadius.circular(32),
+      child: Center(
+        child: isLoading
+            ? SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+              )
+            : Icon(icon, color: isDark ? Colors.white : Colors.black87, size: size),
+      ),
+    ),
+  );
+}
+
+class AegixaLoader extends StatefulWidget {
+  const AegixaLoader({super.key});
+
+  @override
+  State<AegixaLoader> createState() => _AegixaLoaderState();
+}
+
+class _AegixaLoaderState extends State<AegixaLoader>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 3500),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 80,
+      height: 50,
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, child) {
+          final t = _controller.value;
+
+          // Text Animation (text_713)
+          double letterSpacing = 1.0;
+          double textX = 0.0;
+          if (t < 0.4) {
+            final localT = t / 0.4;
+            letterSpacing = lerpDouble(1.0, 2.0, localT);
+            textX = lerpDouble(0.0, 26.0, localT);
+          } else if (t < 0.8) {
+            final localT = (t - 0.4) / 0.4;
+            letterSpacing = lerpDouble(2.0, 1.0, localT);
+            textX = lerpDouble(26.0, 32.0, localT);
+          } else if (t < 0.9) {
+            final localT = (t - 0.8) / 0.1;
+            letterSpacing = lerpDouble(1.0, 2.0, localT);
+            textX = lerpDouble(32.0, 0.0, localT);
+          } else {
+            final localT = (t - 0.9) / 0.1;
+            letterSpacing = lerpDouble(2.0, 1.0, localT);
+            textX = 0.0;
+          }
+
+          // Main Bar Animation (loading_713)
+          double barWidth = 16.0;
+          double barX = 0.0;
+          if (t < 0.4) {
+            final localT = t / 0.4;
+            barWidth = lerpDouble(16.0, 80.0, localT);
+            barX = 0.0;
+          } else if (t < 0.8) {
+            final localT = (t - 0.4) / 0.4;
+            barWidth = lerpDouble(80.0, 16.0, localT);
+            barX = lerpDouble(0.0, 64.0, localT);
+          } else if (t < 0.9) {
+            final localT = (t - 0.8) / 0.1;
+            barWidth = lerpDouble(16.0, 80.0, localT);
+            barX = lerpDouble(64.0, 0.0, localT);
+          } else {
+            final localT = (t - 0.9) / 0.1;
+            barWidth = lerpDouble(80.0, 16.0, localT);
+            barX = 0.0;
+          }
+
+          // Inner Bar Animation (loading2_713)
+          double innerWidth = 16.0;
+          double innerX = 0.0;
+          if (t < 0.4) {
+            final localT = t / 0.4;
+            innerWidth = lerpDouble(16.0, 64.0, localT);
+            innerX = 0.0;
+          } else if (t < 0.8) {
+            final localT = (t - 0.4) / 0.4;
+            innerWidth = lerpDouble(64.0, 80.0, localT);
+            innerX = 0.0;
+          } else if (t < 0.9) {
+            final localT = (t - 0.8) / 0.1;
+            innerWidth = lerpDouble(80.0, 64.0, localT);
+            innerX = lerpDouble(0.0, 15.0, localT);
+          } else {
+            final localT = (t - 0.9) / 0.1;
+            innerWidth = lerpDouble(64.0, 16.0, localT);
+            innerX = lerpDouble(15.0, 0.0, localT);
+          }
+
+          return Stack(
+            children: [
+              Positioned(
+                top: 0,
+                left: textX,
+                child: Text(
+                  'LOADING',
+                  style: TextStyle(
+                    fontSize: 12,
+                    letterSpacing: letterSpacing,
+                    color: const Color(0xFFE11D48),
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              Positioned(
+                bottom: 0,
+                left: barX,
+                child: Container(
+                  width: barWidth,
+                  height: 16,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE11D48),
+                    borderRadius: BorderRadius.circular(50),
+                  ),
+                  child: Stack(
+                    children: [
+                      Positioned(
+                        left: innerX,
+                        child: Container(
+                          width: innerWidth,
+                          height: 16,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFB7185),
+                            borderRadius: BorderRadius.circular(50),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  double lerpDouble(double a, double b, double t) {
+    return a + (b - a) * t;
+  }
+}

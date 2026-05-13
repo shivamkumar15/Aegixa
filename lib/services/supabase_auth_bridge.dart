@@ -23,6 +23,10 @@ class SupabaseAuthBridge {
   Timer? _refreshTimer;
   bool _initialized = false;
 
+  /// Guards against concurrent token exchanges (e.g. auth listener + manual
+  /// syncSession firing at the same time).
+  Completer<void>? _exchangeInFlight;
+
   /// Buffer before the Supabase token expires to trigger a refresh.
   static const _refreshBuffer = Duration(minutes: 5);
 
@@ -72,6 +76,13 @@ class SupabaseAuthBridge {
   }
 
   Future<void> _exchangeToken(User user) async {
+    // If another exchange is already in flight, wait for it instead of
+    // starting a duplicate network call.
+    if (_exchangeInFlight != null) {
+      await _exchangeInFlight!.future;
+      return;
+    }
+
     // Rate-limit to avoid multiple rapid calls.
     final now = DateTime.now();
     if (_lastRefreshAt != null &&
@@ -79,6 +90,7 @@ class SupabaseAuthBridge {
       return;
     }
 
+    _exchangeInFlight = Completer<void>();
     try {
       final idToken = await user.getIdToken(true);
       if (idToken == null) {
@@ -122,6 +134,9 @@ class SupabaseAuthBridge {
       _scheduleRefresh(expiresAt);
     } catch (e) {
       debugPrint('supabase-auth-bridge: exchange failed: $e');
+    } finally {
+      _exchangeInFlight?.complete();
+      _exchangeInFlight = null;
     }
   }
 

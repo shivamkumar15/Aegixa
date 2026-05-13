@@ -129,18 +129,50 @@ class EmergencyContactsService {
     return contacts.isNotEmpty;
   }
 
+  /// Maximum length for contact name to prevent abuse / storage issues.
+  static const _maxNameLength = 100;
+
+  /// Maximum length for phone number string.
+  static const _maxPhoneLength = 20;
+
+  /// Validates and sanitizes a contact before saving.
+  EmergencyContact _sanitizeContact(EmergencyContact contact) {
+    final name = contact.name.trim();
+    if (name.isEmpty) {
+      throw ArgumentError('Contact name must not be empty.');
+    }
+    if (name.length > _maxNameLength) {
+      throw ArgumentError(
+        'Contact name exceeds $_maxNameLength characters.',
+      );
+    }
+
+    final phone = contact.phoneNumber.replaceAll(RegExp(r'[^\d+\-() ]'), '');
+    if (phone.isEmpty) {
+      throw ArgumentError('Contact phone number must not be empty.');
+    }
+    if (phone.length > _maxPhoneLength) {
+      throw ArgumentError(
+        'Phone number exceeds $_maxPhoneLength characters.',
+      );
+    }
+
+    return contact.copyWith(name: name, phoneNumber: phone);
+  }
+
   Future<void> saveContact(EmergencyContact contact) async {
+    final sanitized = _sanitizeContact(contact);
     final userId = _currentUserId;
-    final data = contact.copyWith(userId: userId).toMap()..remove('id');
+    final data = sanitized.copyWith(userId: userId).toMap()..remove('id');
 
     try {
-      if (contact.id == null) {
+      if (sanitized.id == null) {
         await _supabase.from(_table).insert(data);
       } else {
         await _supabase
             .from(_table)
             .update(data)
-            .eq('id', contact.id as Object)
+            .eq('id', sanitized.id as Object)
             .eq('user_id', userId);
       }
     } on PostgrestException catch (e) {

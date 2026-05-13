@@ -110,43 +110,50 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
     final isDark = theme.brightness == Brightness.dark;
 
     return Scaffold(
+      backgroundColor: isDark ? const Color(0xFF000000) : const Color(0xFFF8FAFC),
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
-          icon: Icon(Icons.arrow_back, color: theme.colorScheme.onSurface),
+          icon: Icon(Icons.arrow_back_ios_new, 
+              color: isDark ? Colors.white : Colors.black, size: 20),
           onPressed: () => Navigator.pop(context),
         ),
       ),
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.symmetric(horizontal: 28),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Text(_codeSent ? 'Enter Code' : 'What is your number?',
-                  style: TextStyle(
-                      fontSize: 32,
-                      fontWeight: FontWeight.bold,
-                      color: theme.colorScheme.onSurface,
-                      letterSpacing: -1)),
+              const SizedBox(height: 20),
+              Text(
+                _codeSent ? 'Enter Code' : 'Phone Login',
+                style: TextStyle(
+                  fontSize: 28,
+                  fontWeight: FontWeight.w800,
+                  color: isDark ? Colors.white : const Color(0xFF1E293B),
+                  letterSpacing: -0.5,
+                ),
+              ),
               const SizedBox(height: 8),
               Text(
-                  _codeSent
-                      ? 'We sent a 6-digit code to your phone.'
-                      : 'We will send a verification code to this number.',
-                  style: TextStyle(
-                      fontSize: 16,
-                      color: isDark
-                          ? const Color(0xFFA3A3A3)
-                          : const Color(0xFF6B7280))),
+                _codeSent
+                    ? 'We sent a 6-digit code to your phone.'
+                    : 'Enter your phone number to continue.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 16,
+                  color: isDark ? Colors.white70 : Colors.grey[600],
+                ),
+              ),
               const SizedBox(height: 40),
               if (!_codeSent) ...[
-                buildTextField(
+                buildRoundedTextField(
                   context: context,
-                  label: 'Phone Number',
-                  hint: '',
                   controller: _phoneController,
+                  hint: 'Phone Number',
+                  isDark: isDark,
                   keyboardType: TextInputType.phone,
                   prefixIcon: InkWell(
                     onTap: () {
@@ -156,20 +163,14 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
                         countryListTheme: CountryListThemeData(
                           backgroundColor: theme.colorScheme.surface,
                           bottomSheetHeight: 500,
-                          textStyle:
-                              TextStyle(color: theme.colorScheme.onSurface),
-                          searchTextStyle:
-                              TextStyle(color: theme.colorScheme.onSurface),
+                          textStyle: TextStyle(color: theme.colorScheme.onSurface),
+                          searchTextStyle: TextStyle(color: theme.colorScheme.onSurface),
                           inputDecoration: InputDecoration(
                             labelText: 'Search',
                             hintText: 'Start typing to search',
                             prefixIcon: const Icon(Icons.search),
                             border: OutlineInputBorder(
-                              borderSide: BorderSide(
-                                color: isDark
-                                    ? const Color(0xFF2A2A2A)
-                                    : const Color(0xFFE5E7EB),
-                              ),
+                              borderRadius: BorderRadius.circular(12),
                             ),
                           ),
                         ),
@@ -189,47 +190,48 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
                             '${_selectedCountry.flagEmoji} +${_selectedCountry.phoneCode}',
                             style: TextStyle(
                               fontSize: 16,
-                              color: theme.colorScheme.onSurface,
+                              fontWeight: FontWeight.w600,
+                              color: isDark ? Colors.white : Colors.black,
                             ),
                           ),
-                          const SizedBox(width: 4),
-                          Icon(Icons.arrow_drop_down,
-                              color: theme.colorScheme.onSurface),
+                          const Icon(Icons.arrow_drop_down),
                         ],
                       ),
                     ),
                   ),
                 ),
                 const SizedBox(height: 32),
-                buildButton(
+                buildPrimaryButton(
                   context: context,
                   label: 'Send Code',
                   isLoading: _isLoading,
                   onPressed: _isLoading ? null : _sendOTP,
                 ),
               ] else ...[
-                buildTextField(
+                buildRoundedTextField(
                   context: context,
-                  label: 'Verification Code',
-                  hint: '123456',
                   controller: _codeController,
+                  hint: 'Verification Code',
+                  icon: Icons.security_outlined,
+                  isDark: isDark,
                   keyboardType: TextInputType.number,
                 ),
                 const SizedBox(height: 32),
-                buildButton(
+                buildPrimaryButton(
                   context: context,
                   label: 'Verify',
                   isLoading: _isLoading,
                   onPressed: _isLoading ? null : _verifyOTP,
                 ),
                 const SizedBox(height: 16),
-                Center(
-                  child: TextButton(
-                    onPressed: () => setState(() => _codeSent = false),
-                    child: Text('Change Number',
-                        style: TextStyle(
-                            color: theme.colorScheme.primary,
-                            fontWeight: FontWeight.bold)),
+                TextButton(
+                  onPressed: () => setState(() => _codeSent = false),
+                  child: Text(
+                    'Change Number',
+                    style: TextStyle(
+                      color: theme.colorScheme.primary,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
               ],

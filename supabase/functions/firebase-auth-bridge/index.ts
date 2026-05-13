@@ -27,14 +27,21 @@ const TOKEN_TTL_SECONDS = 3600
 
 Deno.serve(async (request: Request) => {
   // ── CORS preflight ──────────────────────────────────────────────
+  // Mobile apps don't send Origin headers, so CORS is mainly relevant for
+  // web/debug usage. Restrict to the Supabase project URL rather than '*'.
+  const ALLOWED_ORIGINS = [
+    Deno.env.get('SUPABASE_URL') ?? 'https://ilwxanuvttrhxkgmaphq.supabase.co',
+  ]
+  const origin = request.headers.get('Origin') ?? ''
+  const allowedOrigin = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]
+  const corsHeaders = {
+    'Access-Control-Allow-Origin': allowedOrigin,
+    'Access-Control-Allow-Headers':
+      'authorization, x-client-info, apikey, content-type',
+  }
+
   if (request.method === 'OPTIONS') {
-    return new Response('ok', {
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers':
-          'authorization, x-client-info, apikey, content-type',
-      },
-    })
+    return new Response('ok', { headers: corsHeaders })
   }
 
   try {
@@ -88,30 +95,30 @@ Deno.serve(async (request: Request) => {
 
     const supabaseToken = await signHS256JWT(supabasePayload, jwtSecret)
 
-    console.log('auth bridge: minted token', { uid: firebaseUid })
-
     return jsonResponse({
       access_token: supabaseToken,
       token_type: 'bearer',
       expires_at: expiresAt,
       user_id: firebaseUid,
-    })
+    }, 200, corsHeaders)
   } catch (error) {
-    console.error('firebase-auth-bridge error:', error)
+    // Log only the error type — never the UID, token, or payload.
+    const errorType = error instanceof Error ? error.constructor.name : 'unknown'
+    console.error(`firebase-auth-bridge: ${errorType}`)
 
     // Return specific errors for known JWT failures so the client can
     // distinguish between "token expired" (re-fetch) and "invalid" (sign out).
     if (error instanceof jose.errors.JWTExpired) {
-      return jsonResponse({ error: 'Firebase token expired' }, 401)
+      return jsonResponse({ error: 'Firebase token expired' }, 401, corsHeaders)
     }
     if (error instanceof jose.errors.JWTClaimValidationFailed) {
-      return jsonResponse({ error: 'Firebase token validation failed' }, 401)
+      return jsonResponse({ error: 'Firebase token validation failed' }, 401, corsHeaders)
     }
     if (error instanceof jose.errors.JWSSignatureVerificationFailed) {
-      return jsonResponse({ error: 'Firebase token signature invalid' }, 401)
+      return jsonResponse({ error: 'Firebase token signature invalid' }, 401, corsHeaders)
     }
 
-    return jsonResponse({ error: 'Authentication failed' }, 401)
+    return jsonResponse({ error: 'Authentication failed' }, 401, corsHeaders)
   }
 })
 
@@ -156,9 +163,13 @@ function base64UrlEncode(value: string | ArrayBuffer): string {
     .replace(/=+$/g, '')
 }
 
-function jsonResponse(body: unknown, status = 200): Response {
+function jsonResponse(
+  body: unknown,
+  status = 200,
+  headers: Record<string, string> = {},
+): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { 'Content-Type': 'application/json' },
+    headers: { ...headers, 'Content-Type': 'application/json' },
   })
 }

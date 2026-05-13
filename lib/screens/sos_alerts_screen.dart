@@ -6,6 +6,8 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../services/sos_alert_service.dart';
 
+import '../ui_components.dart';
+
 class SosAlertsScreen extends StatelessWidget {
   const SosAlertsScreen({super.key});
 
@@ -33,9 +35,8 @@ class SosAlertsScreen extends StatelessWidget {
           }
 
           if (!snapshot.hasData) {
-            return Center(
-              child:
-                  CircularProgressIndicator(color: theme.colorScheme.primary),
+            return const Center(
+              child: AegixaLoader(),
             );
           }
 

@@ -4,11 +4,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'screens/emergency_contacts_setup_screen.dart';
 import 'screens/home_screen.dart';
+import 'screens/login_screen.dart';
 import 'screens/signup_screen.dart';
 import 'screens/username_setup_screen.dart';
 import 'screens/verify_email_screen.dart';
 import 'services/emergency_contacts_service.dart';
 import 'services/username_service.dart';
+
+import 'ui_components.dart';
 
 class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
@@ -110,7 +113,7 @@ class _AuthGateState extends State<AuthGate> {
           // Clear cached future when user signs out.
           _cachedUid = null;
           _cachedRoutingFuture = null;
-          return const SignUpScreen();
+          return const LoginScreen();
         }
 
         final user = snapshot.data!;
@@ -218,11 +221,9 @@ class _AuthGateState extends State<AuthGate> {
   }
 
   Widget _loadingScaffold(BuildContext context) {
-    return Scaffold(
+    return const Scaffold(
       body: Center(
-        child: CircularProgressIndicator(
-          color: Theme.of(context).colorScheme.primary,
-        ),
+        child: AegixaLoader(),
       ),
     );
   }

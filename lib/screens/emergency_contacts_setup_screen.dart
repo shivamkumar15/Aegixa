@@ -93,9 +93,8 @@ class _EmergencyContactsSetupScreenState
     return Scaffold(
       appBar: AppBar(title: const Text('Emergency Contacts')),
       body: _isLoading
-          ? Center(
-              child:
-                  CircularProgressIndicator(color: theme.colorScheme.primary),
+          ? const Center(
+              child: AegixaLoader(),
             )
           : SafeArea(
               child: ListView(

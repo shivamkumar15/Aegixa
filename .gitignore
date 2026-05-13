@@ -27,11 +27,13 @@ migrate_working_dir/
 **/doc/api/
 **/ios/Flutter/.last_build_id
 .dart_tool/
+.flutter-plugins
 .flutter-plugins-dependencies
 .pub-cache/
 .pub/
 /build/
 /coverage/
+.packages
 
 # Android related
 /android/app/debug
@@ -42,12 +44,14 @@ migrate_working_dir/
 /android/key.properties
 /android/*.jks
 /android/*.keystore
+android/app/google-services.json
 
 # iOS related
 **/ios/Flutter/Generated.xcconfig
 **/ios/Flutter/flutter_export_environment.sh
 **/ios/ServiceDefinitions.json
 **/ios/Runner/GeneratedPluginRegistrant.[mh]
+ios/Runner/GoogleService-Info.plist
 
 # Web related
 .web/
@@ -56,6 +60,7 @@ migrate_working_dir/
 .env
 .env.*
 secret.dart
+lib/firebase_options.dart
 
 # Internal development scripts
 rewrite_ui.py

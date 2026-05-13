@@ -1,5 +1,5 @@
 [functions.send-sos-push]
-verify_jwt = false
+verify_jwt = true
 
 [functions.firebase-auth-bridge]
 verify_jwt = false

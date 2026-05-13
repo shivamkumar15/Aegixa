@@ -4,6 +4,9 @@ type SosAlertPushPayload = {
   alertId: number
   sessionId: string
   recipientUserId: string
+}
+
+type VerifiedSosAlert = SosAlertPushPayload & {
   senderName: string
   alertMessage: string
 }
@@ -29,10 +32,8 @@ Deno.serve(async (request) => {
   }
 
   try {
-    console.log('send-sos-push request received')
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
     const supabaseServiceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
     const firebaseServiceAccountJson = Deno.env.get('FIREBASE_SERVICE_ACCOUNT_JSON') ?? ''
 
     if (!supabaseUrl || !supabaseServiceRoleKey || !firebaseServiceAccountJson) {
@@ -41,34 +42,53 @@ Deno.serve(async (request) => {
       )
     }
 
-    // --- AUTH: Verify the caller is an authenticated Supabase user ---
+    // --- AUTH: Extract caller identity from the verified JWT ---
+    // With verify_jwt = true in config.toml, the Supabase gateway has already
+    // verified the HS256 signature against SUPABASE_JWT_SECRET before the
+    // request reaches this function. We only need to decode the payload to
+    // read the `sub` claim (the Firebase UID set by firebase-auth-bridge).
+    //
+    // We do NOT use supabase.auth.getUser() because our bridge-minted JWTs
+    // have no corresponding row in GoTrue's auth.users table — getUser()
+    // would always return an error.
     const authHeader = request.headers.get('Authorization')
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return jsonResponse({ error: 'Missing or invalid Authorization header' }, 401, corsHeaders)
     }
-    const userToken = authHeader.replace('Bearer ', '')
-    const userSupabase = createClient(supabaseUrl, supabaseAnonKey || supabaseServiceRoleKey, {
-      global: { headers: { Authorization: `Bearer ${userToken}` } },
-    })
-    const { data: { user }, error: authError } = await userSupabase.auth.getUser()
-    if (authError || !user) {
-      console.error('auth verification failed', authError)
-      return jsonResponse({ error: 'Unauthorized' }, 401, corsHeaders)
+    const callerUserId = extractSubFromJwt(authHeader.replace('Bearer ', ''))
+    if (!callerUserId) {
+      return jsonResponse({ error: 'Invalid token: missing sub claim' }, 401, corsHeaders)
     }
-    const callerUserId = user.id
-    console.log('authenticated caller', { callerUserId })
 
     const { alerts } = await request.json() as { alerts?: SosAlertPushPayload[] }
-    const sanitizedAlerts = (alerts ?? []).filter(
-      (alert) => alert && alert.recipientUserId && alert.senderName,
-    )
-    console.log('alerts received', { count: sanitizedAlerts.length })
-    if (sanitizedAlerts.length === 0) {
+    const requestedAlerts = (alerts ?? [])
+      .map((alert) => ({
+        alertId: Number(alert?.alertId),
+        sessionId: String(alert?.sessionId ?? '').trim(),
+        recipientUserId: String(alert?.recipientUserId ?? '').trim(),
+      }))
+      .filter((alert) =>
+        Number.isSafeInteger(alert.alertId) &&
+        alert.alertId > 0 &&
+        alert.sessionId.length > 0 &&
+        alert.recipientUserId.length > 0
+      )
+
+    if (requestedAlerts.length === 0) {
       return jsonResponse({ sentCount: 0, skippedCount: 0 }, 200, corsHeaders)
     }
 
     const supabase = createClient(supabaseUrl, supabaseServiceRoleKey)
-    const recipientUserIds = [...new Set(sanitizedAlerts.map((alert) => alert.recipientUserId))]
+    const verifiedAlerts = await verifyAlertsForCaller(
+      supabase,
+      callerUserId,
+      requestedAlerts,
+    )
+    if (verifiedAlerts.length === 0) {
+      return jsonResponse({ error: 'No authorized SOS alerts found' }, 403, corsHeaders)
+    }
+
+    const recipientUserIds = [...new Set(verifiedAlerts.map((alert) => alert.recipientUserId))]
     const { data: tokenRows, error: tokenError } = await supabase
       .from('push_notification_tokens')
       .select('user_id,fcm_token')
@@ -78,7 +98,6 @@ Deno.serve(async (request) => {
       console.error('token lookup failed', tokenError)
       throw tokenError
     }
-    console.log('tokens fetched', { count: tokenRows?.length ?? 0, recipientUserIds })
 
     const tokensByUserId = new Map<string, string[]>()
     for (const row of tokenRows ?? []) {
@@ -97,26 +116,17 @@ Deno.serve(async (request) => {
       token_uri?: string
     }
     const accessToken = await getGoogleAccessToken(firebaseAccount)
-    console.log('google access token acquired')
 
     let sentCount = 0
     let skippedCount = 0
-    for (const alert of sanitizedAlerts) {
+    for (const alert of verifiedAlerts) {
       const tokens = tokensByUserId.get(alert.recipientUserId) ?? []
       if (tokens.length === 0) {
         skippedCount += 1
-        console.warn('no tokens found for recipient', {
-          recipientUserId: alert.recipientUserId,
-          alertId: alert.alertId,
-        })
         continue
       }
 
       for (const token of tokens) {
-        console.log('sending FCM message', {
-          alertId: alert.alertId,
-          recipientUserId: alert.recipientUserId,
-        })
         const response = await fetch(
           `https://fcm.googleapis.com/v1/projects/${firebaseAccount.project_id}/messages:send`,
           {
@@ -155,10 +165,6 @@ Deno.serve(async (request) => {
 
         if (response.ok) {
           sentCount += 1
-          console.log('FCM message sent', {
-            alertId: alert.alertId,
-            recipientUserId: alert.recipientUserId,
-          })
           continue
         }
 
@@ -175,14 +181,10 @@ Deno.serve(async (request) => {
           errorText.includes('registration-token-not-registered')
         ) {
           await supabase.from('push_notification_tokens').delete().eq('fcm_token', token)
-          console.warn('deleted unregistered token', {
-            recipientUserId: alert.recipientUserId,
-          })
         }
       }
     }
 
-    console.log('send-sos-push completed', { sentCount, skippedCount })
     return jsonResponse({ sentCount, skippedCount }, 200, corsHeaders)
   } catch (error) {
     console.error('send-sos-push crashed', error)
@@ -202,6 +204,54 @@ function jsonResponse(body: unknown, status = 200, headers: Record<string, strin
       'Content-Type': 'application/json',
     },
   })
+}
+
+async function verifyAlertsForCaller(
+  supabase: ReturnType<typeof createClient>,
+  callerUserId: string,
+  requestedAlerts: SosAlertPushPayload[],
+): Promise<VerifiedSosAlert[]> {
+  const requestedById = new Map<number, SosAlertPushPayload>()
+  for (const alert of requestedAlerts) {
+    requestedById.set(alert.alertId, alert)
+  }
+
+  const { data, error } = await supabase
+    .from('sos_alerts')
+    .select('id,session_id,sender_user_id,recipient_user_id,sender_name,alert_message')
+    .eq('sender_user_id', callerUserId)
+    .in('id', [...requestedById.keys()])
+
+  if (error) {
+    console.error('alert authorization lookup failed', error)
+    throw error
+  }
+
+  const verifiedAlerts: VerifiedSosAlert[] = []
+  for (const row of data ?? []) {
+    const alertId = Number(row.id)
+    const requested = requestedById.get(alertId)
+    if (!requested) continue
+
+    const sessionId = String(row.session_id ?? '').trim()
+    const recipientUserId = String(row.recipient_user_id ?? '').trim()
+    if (
+      sessionId !== requested.sessionId ||
+      recipientUserId !== requested.recipientUserId
+    ) {
+      continue
+    }
+
+    verifiedAlerts.push({
+      alertId,
+      sessionId,
+      recipientUserId,
+      senderName: String(row.sender_name ?? '').trim() || 'Aegixa User',
+      alertMessage: String(row.alert_message ?? '').trim(),
+    })
+  }
+
+  return verifiedAlerts
 }
 
 async function getGoogleAccessToken(serviceAccount: {
@@ -285,4 +335,24 @@ function base64Decode(value: string) {
   const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=')
   const binary = atob(padded)
   return Uint8Array.from(binary, (char) => char.charCodeAt(0))
+}
+
+/**
+ * Decode the `sub` claim from a JWT without verifying the signature.
+ *
+ * This is safe here because the Supabase gateway (`verify_jwt = true`) has
+ * already validated the HS256 signature against SUPABASE_JWT_SECRET before
+ * the request reaches this function. We only need to read the payload.
+ */
+function extractSubFromJwt(token: string): string | null {
+  try {
+    const parts = token.split('.')
+    if (parts.length !== 3) return null
+    const payloadJson = new TextDecoder().decode(base64Decode(parts[1]))
+    const payload = JSON.parse(payloadJson) as { sub?: string }
+    const sub = (payload.sub ?? '').trim()
+    return sub.length > 0 ? sub : null
+  } catch {
+    return null
+  }
 }

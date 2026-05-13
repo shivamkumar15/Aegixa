@@ -226,10 +226,16 @@ class UsernameService {
       return const <AegixaUserSuggestion>[];
     }
 
+    // Escape ILIKE wildcards so user input cannot widen the search pattern.
+    final safeQuery = query
+        .replaceAll(r'\', r'\\')
+        .replaceAll('%', r'\%')
+        .replaceAll('_', r'\_');
+
     final rows = await _supabase
         .from(_table)
         .select('uid,username')
-        .ilike('username', '$query%')
+        .ilike('username', '$safeQuery%')
         .limit(limit);
 
     final suggestions = rows

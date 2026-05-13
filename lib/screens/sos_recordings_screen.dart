@@ -6,6 +6,8 @@ import 'package:open_filex/open_filex.dart';
 
 import '../services/sos_recording_service.dart';
 
+import '../ui_components.dart';
+
 class SosRecordingsScreen extends StatefulWidget {
   const SosRecordingsScreen({super.key});
 
@@ -232,12 +234,10 @@ class _SosRecordingsScreenState extends State<SosRecordingsScreen> {
           padding: const EdgeInsets.all(20),
           children: [
             if (_isLoading)
-              Padding(
+              const Padding(
                 padding: const EdgeInsets.only(top: 80),
                 child: Center(
-                  child: CircularProgressIndicator(
-                    color: theme.colorScheme.primary,
-                  ),
+                  child: AegixaLoader(),
                 ),
               )
             else if (_recordings.isEmpty && _videos.isEmpty)

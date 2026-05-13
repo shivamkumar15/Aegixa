@@ -31,6 +31,8 @@ import 'battery_optimization_guide_screen.dart';
 import 'sos_alerts_screen.dart';
 import 'sos_recordings_screen.dart';
 
+import '../ui_components.dart';
+
 class HomeScreen extends StatefulWidget {
   const HomeScreen({
     super.key,
@@ -286,7 +288,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _restoreSosStateIfNeeded() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final savedSessionId = (prefs.getString(_activeSosSessionKey) ?? '').trim();
+      final savedSessionId =
+          (prefs.getString(_activeSosSessionKey) ?? '').trim();
       if (savedSessionId.isEmpty || !mounted) {
         return;
       }
@@ -380,7 +383,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
       setState(() {
         _isSosActive = true;
-        _activeSosRecordingPath = shouldRecordVoice ? 'native_audio_pending' : null;
+        _activeSosRecordingPath =
+            shouldRecordVoice ? 'native_audio_pending' : null;
         _activeSosVideoPath = shouldRecordVideo ? 'native_video_pending' : null;
         _activeSosSessionId = dispatch.sessionId;
       });
@@ -1441,7 +1445,7 @@ class _SosHoldButtonState extends State<_SosHoldButton>
       curve: Curves.easeOutCubic,
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: widget.isSosActive ? const Color(0xFFFF7C93) : panelColor,
+        color: widget.isSosActive ? const Color(0xFFFF4D6D) : panelColor,
         borderRadius: BorderRadius.circular(34),
         border: Border.all(
           color: widget.isSosActive
@@ -1483,8 +1487,8 @@ class _SosHoldButtonState extends State<_SosHoldButton>
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: Colors.white,
-                    fontSize: 30,
-                    fontWeight: FontWeight.w800,
+                    fontSize: 32,
+                    fontWeight: FontWeight.w900,
                     height: 1.1,
                   ),
                 ),
@@ -1567,10 +1571,10 @@ class _SosHoldButtonState extends State<_SosHoldButton>
                                   ),
                                 )
                               : const Text(
-                                  'Cancel SOS',
+                                  'Cancel Alert',
                                   style: TextStyle(
-                                    fontWeight: FontWeight.w800,
-                                    fontSize: 15,
+                                    fontWeight: FontWeight.w900,
+                                    fontSize: 16,
                                   ),
                                 ),
                         ),
@@ -1597,23 +1601,22 @@ class _SosHoldButtonState extends State<_SosHoldButton>
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  'Emergency SOS',
+                  'Emergency Alert',
                   style: TextStyle(
                     color: theme.colorScheme.onSurface,
-                    fontSize: 26,
-                    fontWeight: FontWeight.w800,
+                    fontSize: 28,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.5,
                   ),
                 ),
                 const SizedBox(height: 8),
-                Text(
-                  'Press and hold to trigger emergency help instantly.',
+                const Text(
+                  'Press and hold to trigger an emergency alert instantly.',
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: isDark
-                        ? const Color(0xFFA3A3A3)
-                        : const Color(0xFF6B7280),
-                    fontSize: 14,
-                    height: 1.4,
+                    color: Color(0xFFA3A3A3),
+                    fontSize: 15,
+                    height: 1.5,
                   ),
                 ),
                 const SizedBox(height: 30),
@@ -1659,18 +1662,18 @@ class _SosHoldButtonState extends State<_SosHoldButton>
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
                               gradient: const LinearGradient(
-                                begin: Alignment.topCenter,
-                                end: Alignment.bottomCenter,
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
                                 colors: [
-                                  Color(0xFFFF6A87),
-                                  accentColor,
+                                  Color(0xFFFF4D6D),
+                                  Color(0xFFC9184A),
                                 ],
                               ),
                               boxShadow: [
                                 BoxShadow(
-                                  color: accentColor.withValues(alpha: 0.28),
-                                  blurRadius: 18,
-                                  offset: const Offset(0, 8),
+                                  color: accentColor.withValues(alpha: 0.35),
+                                  blurRadius: 24,
+                                  offset: const Offset(0, 12),
                                 ),
                               ],
                             ),
@@ -1680,18 +1683,18 @@ class _SosHoldButtonState extends State<_SosHoldButton>
                                 Icon(
                                   _isProcessing
                                       ? Icons.sync_rounded
-                                      : Icons.warning_amber_rounded,
+                                      : Icons.notifications_active_rounded,
                                   color: Colors.white,
-                                  size: 42,
+                                  size: 48,
                                 ),
-                                const SizedBox(height: 8),
+                                const SizedBox(height: 10),
                                 Text(
-                                  _isProcessing ? 'WAIT' : 'SOS',
+                                  _isProcessing ? 'WAIT' : 'ALERT',
                                   style: const TextStyle(
                                     color: Colors.white,
-                                    fontSize: 18,
+                                    fontSize: 20,
                                     fontWeight: FontWeight.w900,
-                                    letterSpacing: 1.2,
+                                    letterSpacing: 2,
                                   ),
                                 ),
                               ],
@@ -1707,16 +1710,12 @@ class _SosHoldButtonState extends State<_SosHoldButton>
                   _isHolding
                       ? 'Hold... ${(_holdController.value * widget.holdDuration).clamp(0, widget.holdDuration).toStringAsFixed(1)}s / ${widget.holdDuration}.0s'
                       : (_isProcessing
-                          ? 'Preparing SOS...'
+                          ? 'Preparing Alert...'
                           : 'Release before ${widget.holdDuration} seconds to cancel'),
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: _isHolding
-                        ? accentColor
-                        : (isDark
-                            ? const Color(0xFFA3A3A3)
-                            : const Color(0xFF6B7280)),
-                    fontSize: 13,
+                    color: _isHolding ? accentColor : const Color(0xFFA3A3A3),
+                    fontSize: 14,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -3367,8 +3366,8 @@ class _EmergencyContactsTabState extends State<_EmergencyContactsTab> {
     final isDark = theme.brightness == Brightness.dark;
 
     if (_isLoading) {
-      return Center(
-        child: CircularProgressIndicator(color: theme.colorScheme.primary),
+      return const Center(
+        child: AegixaLoader(),
       );
     }
 
@@ -3535,15 +3534,16 @@ class _StoredEmergencyContactTile extends StatelessWidget {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
-                    color: theme.colorScheme.primary.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(999),
+                    color: theme.colorScheme.primary,
+                    borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(
                     'Primary',
                     style: TextStyle(
-                      color: theme.colorScheme.primary,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12,
+                      color: isDark ? Colors.black : Colors.white,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 11,
+                      letterSpacing: 0.3,
                     ),
                   ),
                 ),
@@ -3569,16 +3569,26 @@ class _StoredEmergencyContactTile extends StatelessWidget {
               Expanded(
                 child: FilledButton.icon(
                   onPressed: onCall,
-                  icon: const Icon(Icons.call_outlined),
+                  icon: const Icon(Icons.call_outlined, size: 18),
                   label: const Text('Call'),
+                  style: FilledButton.styleFrom(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
                 ),
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: OutlinedButton.icon(
                   onPressed: onEdit,
-                  icon: const Icon(Icons.edit_outlined),
+                  icon: const Icon(Icons.edit_outlined, size: 18),
                   label: const Text('Edit'),
+                  style: OutlinedButton.styleFrom(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
                 ),
               ),
             ],
@@ -4140,46 +4150,40 @@ class _ProfileTabState extends State<_ProfileTab> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Primary contacts',
+                'Your Contacts',
                 style: TextStyle(
                   fontSize: 19,
                   fontWeight: FontWeight.w700,
                   color: theme.colorScheme.onSurface,
                 ),
               ),
-              const SizedBox(height: 4),
-              Text(
-                'People who receive your SOS alerts first.',
-                style: TextStyle(
-                  color: isDark
-                      ? const Color(0xFFA3A3A3)
-                      : const Color(0xFF6B7280),
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
               const SizedBox(height: 14),
               SizedBox(
                 width: double.infinity,
-                child: OutlinedButton.icon(
+                child: FilledButton.icon(
                   onPressed: () => _openContactSheet(),
                   icon: const Icon(Icons.add),
                   label: const Text('Add contact'),
-                  style: OutlinedButton.styleFrom(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: theme.colorScheme.primary,
+                    foregroundColor: isDark ? Colors.black : Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 13),
-                    side: BorderSide(
-                      color: theme.colorScheme.primary.withValues(alpha: 0.55),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    textStyle: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 16,
                     ),
                   ),
                 ),
               ),
               const SizedBox(height: 14),
               if (_isLoadingContacts)
-                Center(
+                const Center(
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    child: CircularProgressIndicator(
-                      color: theme.colorScheme.primary,
-                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 32),
+                    child: AegixaLoader(),
                   ),
                 )
               else if (_contacts.isEmpty)
@@ -4349,6 +4353,11 @@ class _SettingsTab extends StatelessWidget {
                       width: double.infinity,
                       child: FilledButton(
                         onPressed: () => Navigator.of(sheetContext).pop(),
+                        style: FilledButton.styleFrom(
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
                         child: const Text('Done'),
                       ),
                     ),
@@ -4405,10 +4414,22 @@ class _SettingsTab extends StatelessWidget {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(false),
+              style: TextButton.styleFrom(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
               child: const Text('Cancel'),
             ),
             FilledButton(
               onPressed: () => Navigator.of(dialogContext).pop(true),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFE11D48),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
               child: const Text('Log out'),
             ),
           ],
@@ -4494,6 +4515,11 @@ class _SettingsTab extends StatelessWidget {
                     ),
                     const SizedBox(height: 14),
                     SegmentedButton<ThemeMode>(
+                      style: SegmentedButton.styleFrom(
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
                       segments: const [
                         ButtonSegment<ThemeMode>(
                           value: ThemeMode.system,
@@ -4718,6 +4744,11 @@ class _SettingsTab extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               SegmentedButton<int>(
+                style: SegmentedButton.styleFrom(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
                 segments: const [
                   ButtonSegment<int>(value: 2, label: Text('2s')),
                   ButtonSegment<int>(value: 5, label: Text('5s')),
