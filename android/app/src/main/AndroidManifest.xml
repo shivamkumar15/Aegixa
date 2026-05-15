@@ -15,7 +15,7 @@
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <application
-        android:label="Aegixa"
+        android:label="Sailor"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="false"
@@ -54,7 +54,7 @@
         <service
             android:name=".SosShortcutAccessibilityService"
             android:exported="false"
-            android:label="Aegixa SOS Shortcut"
+            android:label="Sailor SOS Shortcut"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />

@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 
-class AegixaSwitch extends StatefulWidget {
+class SailorSwitch extends StatefulWidget {
   final bool value;
   final ValueChanged<bool> onChanged;
   final Color? activeColor;
   final Color? inactiveColor;
 
-  const AegixaSwitch({
+  const SailorSwitch({
     super.key,
     required this.value,
     required this.onChanged,
@@ -15,10 +15,10 @@ class AegixaSwitch extends StatefulWidget {
   });
 
   @override
-  State<AegixaSwitch> createState() => _AegixaSwitchState();
+  State<SailorSwitch> createState() => _SailorSwitchState();
 }
 
-class _AegixaSwitchState extends State<AegixaSwitch>
+class _SailorSwitchState extends State<SailorSwitch>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   late final Animation<double> _animation;
@@ -40,7 +40,7 @@ class _AegixaSwitchState extends State<AegixaSwitch>
   }
 
   @override
-  void didUpdateWidget(AegixaSwitch oldWidget) {
+  void didUpdateWidget(SailorSwitch oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.value != oldWidget.value) {
       if (widget.value) {

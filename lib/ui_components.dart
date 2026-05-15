@@ -401,14 +401,14 @@ Widget buildSocialIcon({
   );
 }
 
-class AegixaLoader extends StatefulWidget {
-  const AegixaLoader({super.key});
+class SailorLoader extends StatefulWidget {
+  const SailorLoader({super.key});
 
   @override
-  State<AegixaLoader> createState() => _AegixaLoaderState();
+  State<SailorLoader> createState() => _SailorLoaderState();
 }
 
-class _AegixaLoaderState extends State<AegixaLoader>
+class _SailorLoaderState extends State<SailorLoader>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
 
@@ -437,7 +437,7 @@ class _AegixaLoaderState extends State<AegixaLoader>
         builder: (context, child) {
           final t = _controller.value;
 
-          // Text Animation (text_713)
+          // text_713
           double letterSpacing = 1.0;
           double textX = 0.0;
           if (t < 0.4) {
@@ -458,7 +458,7 @@ class _AegixaLoaderState extends State<AegixaLoader>
             textX = 0.0;
           }
 
-          // Main Bar Animation (loading_713)
+          // loading_713
           double barWidth = 16.0;
           double barX = 0.0;
           if (t < 0.4) {
@@ -479,7 +479,7 @@ class _AegixaLoaderState extends State<AegixaLoader>
             barX = 0.0;
           }
 
-          // Inner Bar Animation (loading2_713)
+          // loading2_713
           double innerWidth = 16.0;
           double innerX = 0.0;
           if (t < 0.4) {

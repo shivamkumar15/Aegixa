@@ -24,8 +24,8 @@ Future<bool> showEmergencyContactEditorSheet(
   var isPrimary = contact?.isPrimary ?? suggestPrimary;
   var isSaving = false;
   var checkingUsername = false;
-  var usernameSuggestions = <AegixaUserSuggestion>[];
-  AegixaUserSuggestion? selectedUser;
+  var usernameSuggestions = <SailorUserSuggestion>[];
+  SailorUserSuggestion? selectedUser;
   String? usernameError;
   Timer? usernameDebounce;
 
@@ -45,7 +45,7 @@ Future<bool> showEmergencyContactEditorSheet(
               setModalState(() {
                 checkingUsername = false;
                 usernameError = null;
-                usernameSuggestions = <AegixaUserSuggestion>[];
+                usernameSuggestions = <SailorUserSuggestion>[];
               });
               return;
             }
@@ -89,12 +89,12 @@ Future<bool> showEmergencyContactEditorSheet(
               setModalState(() {
                 checkingUsername = false;
                 usernameError = null;
-                usernameSuggestions = <AegixaUserSuggestion>[];
+                usernameSuggestions = <SailorUserSuggestion>[];
               });
             }
           }
 
-          AegixaUserSuggestion? resolveExactUser(String username) {
+          SailorUserSuggestion? resolveExactUser(String username) {
             for (final item in usernameSuggestions) {
               if (item.username == username) {
                 return item;
@@ -195,7 +195,7 @@ Future<bool> showEmergencyContactEditorSheet(
                           const SizedBox(height: 24),
                           buildTextField(
                             context: sheetContext,
-                            label: 'Aegixa username',
+                            label: 'Sailor username',
                             hint: '',
                             controller: usernameController,
                             onChanged: (value) {
@@ -274,7 +274,7 @@ Future<bool> showEmergencyContactEditorSheet(
                                             selectedUser = item;
                                             usernameError = null;
                                             usernameSuggestions =
-                                                <AegixaUserSuggestion>[];
+                                                <SailorUserSuggestion>[];
                                           });
                                         },
                                       ),
@@ -423,26 +423,34 @@ Future<bool> showEmergencyContactEditorSheet(
                                                   normalizedUsername);
 
                                           if (matchedUser == null) {
-                                            final remoteSuggestions =
-                                                await usernameService
-                                                    .searchUsers(
-                                              normalizedUsername,
-                                              limit: 10,
-                                            );
-                                            for (final item
-                                                in remoteSuggestions) {
-                                              if (item.username ==
-                                                  normalizedUsername) {
-                                                matchedUser = item;
-                                                break;
+                                            try {
+                                              final remoteSuggestions =
+                                                  await usernameService
+                                                      .searchUsers(
+                                                normalizedUsername,
+                                                limit: 10,
+                                              );
+                                              for (final item
+                                                  in remoteSuggestions) {
+                                                if (item.username ==
+                                                    normalizedUsername) {
+                                                  matchedUser = item;
+                                                  break;
+                                                }
                                               }
+                                            } catch (_) {
+                                              setModalState(() {
+                                                usernameError =
+                                                    'Could not verify user. Please check your internet connection.';
+                                              });
+                                              return;
                                             }
                                           }
 
                                           if (matchedUser == null) {
                                             setModalState(() {
                                               usernameError =
-                                                  'Only existing Aegixa users can be added.';
+                                                  'Only existing Sailor users can be added.';
                                             });
                                             return;
                                           }

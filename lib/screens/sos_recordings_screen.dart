@@ -237,7 +237,7 @@ class _SosRecordingsScreenState extends State<SosRecordingsScreen> {
               const Padding(
                 padding: const EdgeInsets.only(top: 80),
                 child: Center(
-                  child: AegixaLoader(),
+                  child: SailorLoader(),
                 ),
               )
             else if (_recordings.isEmpty && _videos.isEmpty)

@@ -24,7 +24,7 @@ class PanicOverlayScreen extends StatefulWidget {
 
 class _PanicOverlayScreenState extends State<PanicOverlayScreen> {
   String _senderName = 'Emergency contact';
-  String _alertMessage = 'PANIC ALERT received. Open Aegixa immediately.';
+  String _alertMessage = 'PANIC ALERT received. Open Sailor immediately.';
 
   @override
   void initState() {
@@ -109,7 +109,7 @@ class _PanicOverlayScreenState extends State<PanicOverlayScreen> {
                 ),
                 const SizedBox(height: 18),
                 const Text(
-                  'Open Aegixa now and check the SOS inbox for live location details.',
+                  'Open Sailor now and check the SOS inbox for live location details.',
                   style: TextStyle(
                     color: Color(0xFFFCA5A5),
                     fontSize: 14,

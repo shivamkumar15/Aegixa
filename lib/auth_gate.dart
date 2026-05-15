@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -5,10 +7,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'screens/emergency_contacts_setup_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
-import 'screens/signup_screen.dart';
 import 'screens/username_setup_screen.dart';
 import 'screens/verify_email_screen.dart';
 import 'services/emergency_contacts_service.dart';
+import 'services/sos_trigger_cache_service.dart';
 import 'services/username_service.dart';
 
 import 'ui_components.dart';
@@ -40,6 +42,27 @@ class _AuthGateState extends State<AuthGate> {
   /// **in parallel** instead of sequentially.  This cuts the visible loading
   /// time from 3 serial round-trips down to one parallel batch.
   Future<_RoutingDecision> _resolveRouting(String uid) async {
+    unawaited(SosTriggerCacheService().warmup());
+
+    // ── Fast path ──────────────────────────────────────────────────────
+    // If the user previously completed all setup steps (username, profile
+    // details, onboarding), skip network checks entirely for instant
+    // startup.  This eliminates the 2-second timeout window that causes
+    // offline users to land on the setup screen by mistake.
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getBool('routing_setup_complete_$uid') ?? false) {
+        return _RoutingDecision(
+          username: uid, // non-empty → passes hasUsername check
+          hasProfileDetails: true,
+          shouldShowOnboarding: false,
+        );
+      }
+    } catch (_) {
+      // SharedPreferences failure — fall through to normal path.
+    }
+
+    // ── Normal path (first-time / re-verification) ────────────────────
     try {
       final results = await Future.wait([
         UsernameService().getUsernameForUserId(uid).timeout(
@@ -48,23 +71,33 @@ class _AuthGateState extends State<AuthGate> {
         ),
         _hasProfileDetails(uid).timeout(
           const Duration(seconds: 2),
-          // Fail-closed: if we can't verify profile completeness, assume
-          // incomplete so the user is routed to setup instead of HomeScreen.
           onTimeout: () => false,
         ),
         EmergencyContactsService().shouldShowOnboarding().timeout(
           const Duration(seconds: 2),
-          // Fail-closed: if we can't check onboarding, assume it's needed
-          // so the user is routed to emergency contacts setup.
           onTimeout: () => true,
         ),
       ]);
 
-      return _RoutingDecision(
+      final decision = _RoutingDecision(
         username: results[0] as String?,
         hasProfileDetails: results[1] as bool,
         shouldShowOnboarding: results[2] as bool,
       );
+
+      // Persist completion flag so future launches skip network checks.
+      final hasUsername =
+          (decision.username ?? '').trim().isNotEmpty;
+      if (hasUsername &&
+          decision.hasProfileDetails &&
+          !decision.shouldShowOnboarding) {
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setBool('routing_setup_complete_$uid', true);
+        } catch (_) {}
+      }
+
+      return decision;
     } catch (_) {
       return const _RoutingDecision(
         username: null,
@@ -223,7 +256,7 @@ class _AuthGateState extends State<AuthGate> {
   Widget _loadingScaffold(BuildContext context) {
     return const Scaffold(
       body: Center(
-        child: AegixaLoader(),
+        child: SailorLoader(),
       ),
     );
   }

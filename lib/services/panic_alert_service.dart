@@ -36,7 +36,7 @@ class PanicAlertPayload {
               .toString(),
       alertMessage: (map['alertMessage'] ??
               map['alert_message'] ??
-              'PANIC ALERT received. Open Aegixa immediately.')
+              'PANIC ALERT received. Open Sailor immediately.')
           .toString(),
     );
   }
@@ -145,7 +145,7 @@ class PanicAlertService {
           ? DateTime.now().millisecondsSinceEpoch
           : payload.alertId,
       'PANIC ALERT',
-      '${payload.senderName} sent an emergency SOS. Open Aegixa now.',
+      '${payload.senderName} sent an emergency SOS. Open Sailor now.',
       details,
       payload: 'sos_inbox',
     );
@@ -193,7 +193,7 @@ class PanicAlertService {
       visibility: overlay.NotificationVisibility.visibilityPublic,
       flag: overlay.OverlayFlag.focusPointer,
       overlayTitle: 'PANIC ALERT',
-      overlayContent: 'Aegixa emergency SOS alert',
+      overlayContent: 'Sailor emergency SOS alert',
     );
 
     await overlay.FlutterOverlayWindow.shareData(

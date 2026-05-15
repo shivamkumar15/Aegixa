@@ -1,10 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:aegixa/main.dart';
+import 'package:sailor/main.dart';
 
 void main() {
-  testWidgets('AegixaApp renders', (WidgetTester tester) async {
-    await tester.pumpWidget(const AegixaApp());
+  testWidgets('SailorApp renders', (WidgetTester tester) async {
+    await tester.pumpWidget(const SailorApp());
     // Basic smoke test — app should render without crashing
-    expect(find.byType(AegixaApp), findsOneWidget);
+    expect(find.byType(SailorApp), findsOneWidget);
   });
 }

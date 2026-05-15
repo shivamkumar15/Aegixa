@@ -1,7 +1,7 @@
-# Aegixa 
+# Sailor 
 
 <p align="center">
-  <img src="assets/Logo.png" alt="Aegixa Logo" width="120" height="120">
+  <img src="assets/Logo.png" alt="Sailor Logo" width="120" height="120">
 </p>
 
 <p align="center">
@@ -17,11 +17,11 @@
 
 ---
 
-##  Why Aegixa?
+##  Why Sailor?
 
 In critical moments, speed and reliability are everything. Traditional safety apps often fail because they require too many steps to activate or are silenced by aggressive battery management. 
 
-**Aegixa** (from *Aegis*, the mythological shield) was designed as a "Guardian" that stays vigilant in the background. It is built for:
+**Sailor** (from *Aegis*, the mythological shield) was designed as a "Guardian" that stays vigilant in the background. It is built for:
 - **Speed Under Pressure**: A hold-to-activate flow that ensures SOS is triggered only when intended, but instantly.
 - **Unstoppable Alerts**: Leveraging Android Overlays and Full-Screen Intents to ensure you see an alert even if your phone is locked or you're using another app.
 - **Evidence That Matters**: Automatically capturing audio and video to provide a clear record of the emergency.
@@ -30,7 +30,7 @@ In critical moments, speed and reliability are everything. Traditional safety ap
 
 ##  Overview
 
-Aegixa is a high-performance personal safety application built with Flutter. It combines real-time location sharing with automated media evidence capture, providing a comprehensive safety net for individuals in vulnerable situations.
+Sailor is a high-performance personal safety application built with Flutter. It combines real-time location sharing with automated media evidence capture, providing a comprehensive safety net for individuals in vulnerable situations.
 
 ##  Key Features
 
@@ -59,7 +59,7 @@ Aegixa is a high-performance personal safety application built with Flutter. It 
 5. **Resolution**: Once the session ends, media is uploaded. Recipients are notified to download evidence, and remote storage is optimized via automated cleanup.
 
 ### Background Reliability
-Aegixa includes specialized **OEM Battery Guidance**. Since brands like Xiaomi and Oppo aggressively kill background services, Aegixa detects the device brand and provides the user with a direct shortcut to "Autostart" and "Battery Optimization" settings to ensure the "Guardian" remains active.
+Sailor includes specialized **OEM Battery Guidance**. Since brands like Xiaomi and Oppo aggressively kill background services, Sailor detects the device brand and provides the user with a direct shortcut to "Autostart" and "Battery Optimization" settings to ensure the "Guardian" remains active.
 
 ---
 

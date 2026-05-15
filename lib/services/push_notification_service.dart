@@ -43,8 +43,13 @@ class PushNotificationService {
 
     await _authSubscription?.cancel();
     await _tokenRefreshSubscription?.cancel();
-    await _messaging.setAutoInitEnabled(true);
-    await _messaging.requestPermission(alert: true, badge: true, sound: true);
+    try {
+      await _messaging.setAutoInitEnabled(true);
+      await _messaging.requestPermission(
+          alert: true, badge: true, sound: true);
+    } catch (e) {
+      debugPrint('Firebase Messaging setup failed: $e');
+    }
     await PanicAlertService().initialize(navigatorKey);
 
     FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
@@ -77,17 +82,21 @@ class PushNotificationService {
   }
 
   Future<void> _syncCurrentToken() async {
-    final userId = FirebaseAuth.instance.currentUser?.uid;
-    if ((userId ?? '').isEmpty) {
-      return;
-    }
+    try {
+      final userId = FirebaseAuth.instance.currentUser?.uid;
+      if ((userId ?? '').isEmpty) {
+        return;
+      }
 
-    final token = await _messaging.getToken();
-    if ((token ?? '').isEmpty) {
-      return;
-    }
+      final token = await _messaging.getToken();
+      if ((token ?? '').isEmpty) {
+        return;
+      }
 
-    await _upsertToken(userId!, token!);
+      await _upsertToken(userId!, token!);
+    } catch (e) {
+      debugPrint('FCM token sync failed: $e');
+    }
   }
 
   Future<void> _upsertToken(String userId, String token) async {

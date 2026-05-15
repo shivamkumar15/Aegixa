@@ -79,7 +79,7 @@ class SosRecordingService {
   static final SosRecordingService _instance = SosRecordingService._();
   factory SosRecordingService() => _instance;
 
-  static const _dbName = 'aegixa_sos.db';
+  static const _dbName = 'sailor_sos.db';
   static const _table = 'sos_recordings';
   static const _videoTable = 'sos_videos';
 

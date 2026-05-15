@@ -57,33 +57,41 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
     }
     _lastOtpSentAt = now;
     setState(() => _isLoading = true);
-    await _authService.signInWithPhone(
-      phoneNumber:
-          '+${_selectedCountry.phoneCode}${_phoneController.text.trim()}',
-      onCodeSent: (verificationId, resendToken) {
-        if (mounted) {
-          setState(() {
-            _verificationId = verificationId;
-            _codeSent = true;
-            _isLoading = false;
-          });
-        }
-      },
-      onAutoVerified: (credential) async {
-        try {
-          await _authService.signInWithCredential(credential);
+    try {
+      await _authService.signInWithPhone(
+        phoneNumber:
+            '+${_selectedCountry.phoneCode}${_phoneController.text.trim()}',
+        onCodeSent: (verificationId, resendToken) {
           if (mounted) {
-            Navigator.popUntil(context, (route) => route.isFirst);
+            setState(() {
+              _verificationId = verificationId;
+              _codeSent = true;
+              _isLoading = false;
+            });
           }
-        } catch (_) {}
-      },
-      onError: (e) {
-        if (mounted) {
-          setState(() => _isLoading = false);
-          _showError('Failed to send code.');
-        }
-      },
-    );
+        },
+        onAutoVerified: (credential) async {
+          try {
+            await _authService.signInWithCredential(credential);
+            if (mounted) {
+              Navigator.popUntil(context, (route) => route.isFirst);
+            }
+          } catch (_) {}
+        },
+        onError: (e) {
+          if (mounted) {
+            setState(() => _isLoading = false);
+            _showError('Failed to send code.');
+          }
+        },
+      );
+    } catch (_) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        _showError(
+            'Could not send code. Please check your internet connection.');
+      }
+    }
   }
 
   Future<void> _verifyOTP() async {

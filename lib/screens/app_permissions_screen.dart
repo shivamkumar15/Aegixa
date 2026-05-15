@@ -205,7 +205,7 @@ class _AppPermissionsScreenState extends State<AppPermissionsScreen>
           padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
           child: _isChecking
               ? const Center(
-                  child: AegixaLoader(),
+                  child: SailorLoader(),
                 )
               : ListView(
                   children: [
@@ -227,7 +227,7 @@ class _AppPermissionsScreenState extends State<AppPermissionsScreen>
                     ),
                     const SizedBox(height: 12),
                     const Text(
-                      'Aegixa needs location, microphone, camera, notification, and overlay access from the start so SOS, live tracking, emergency evidence, and panic alerts work instantly.',
+                      'Sailor needs location, microphone, camera, notification, and overlay access from the start so SOS, live tracking, emergency evidence, and panic alerts work instantly.',
                       style: TextStyle(
                         fontSize: 15,
                         height: 1.6,
@@ -252,7 +252,7 @@ class _AppPermissionsScreenState extends State<AppPermissionsScreen>
                             ),
                             const SizedBox(height: 8),
                             const Text(
-                              'On many Android phones, panic notifications can be delayed unless Aegixa is excluded from battery optimization.',
+                              'On many Android phones, panic notifications can be delayed unless Sailor is excluded from battery optimization.',
                               style: TextStyle(
                                 height: 1.45,
                                 color: Color(0xFFA3A3A3),

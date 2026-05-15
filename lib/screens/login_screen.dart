@@ -141,7 +141,6 @@ class _LoginScreenState extends State<LoginScreen> {
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   const SizedBox(height: 8),
-                  // Logo
                   Hero(
                     tag: 'app_logo',
                     child: Image.asset(
@@ -151,7 +150,6 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
                   const SizedBox(height: 20),
-                  // Title
                   Text(
                     'Welcome back',
                     style: TextStyle(
@@ -171,7 +169,6 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 40),
 
-                  // Email Field
                   buildRoundedTextField(
                     context: context,
                     controller: _emailController,
@@ -183,7 +180,6 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 20),
 
-                  // Password Field
                   buildRoundedTextField(
                     context: context,
                     controller: _passwordController,
@@ -206,7 +202,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
 
-                  // Forgot Password
+
                   Align(
                     alignment: Alignment.centerRight,
                     child: TextButton(
@@ -223,7 +219,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 30),
 
-                  // Login Button
+
                   buildPrimaryButton(
                     context: context,
                     label: 'Login',
@@ -233,7 +229,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
                   const SizedBox(height: 40),
 
-                  // Or login with
                   Row(
                     children: [
                       Expanded(
@@ -260,7 +255,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
                   const SizedBox(height: 30),
 
-                  // Social Buttons Row
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
@@ -300,7 +294,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
                   const SizedBox(height: 40),
 
-                  // Sign up link
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
@@ -338,7 +331,7 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  void _handleForgotPassword() {
+  Future<void> _handleForgotPassword() async {
     final email = _emailController.text.trim();
     if (email.isEmpty) {
       _showError('Enter your email first');
@@ -358,7 +351,13 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
     _lastPasswordResetAt = now;
-    _authService.sendPasswordResetEmail(email);
+    try {
+      await _authService.sendPasswordResetEmail(email);
+    } catch (_) {
+      // Silently ignore — we show the same generic message regardless so as
+      // not to reveal whether the email exists.
+    }
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content:
             Text('If that email is registered, a reset link has been sent.')));

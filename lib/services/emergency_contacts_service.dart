@@ -77,7 +77,10 @@ class EmergencyContactsService {
   static const _table = 'emergency_contacts';
   static const _skipKeyPrefix = 'emergency_contacts_setup_skipped_';
   static const _cacheKeyPrefix = 'emergency_contacts_cache_';
+  static const Duration _cacheTtl = Duration(minutes: 10);
   final SupabaseClient _supabase = Supabase.instance.client;
+  final Map<String, List<EmergencyContact>> _memoryCache = {};
+  final Map<String, DateTime> _memoryCacheExpiresAt = {};
 
   String get _currentUserId {
     final user = FirebaseAuth.instance.currentUser;
@@ -89,6 +92,17 @@ class EmergencyContactsService {
 
   Future<List<EmergencyContact>> getContacts() async {
     final userId = _currentUserId;
+    final freshMemoryCache = _getFreshMemoryCache(userId);
+    if (freshMemoryCache != null) {
+      return freshMemoryCache;
+    }
+
+    final persistedCache = await _loadContactsCache(userId, requireFresh: true);
+    if (persistedCache != null) {
+      _setMemoryCache(userId, persistedCache);
+      return persistedCache;
+    }
+
     try {
       final rows = await _supabase
           .from(_table)
@@ -119,7 +133,7 @@ class EmergencyContactsService {
         await _saveContactsCache(userId, contacts);
         return contacts;
       } catch (_) {
-        return _loadContactsCache(userId);
+        return (await _loadContactsCache(userId)) ?? const [];
       }
     }
   }
@@ -237,28 +251,75 @@ class EmergencyContactsService {
     String userId,
     List<EmergencyContact> contacts,
   ) async {
+    _setMemoryCache(userId, contacts);
     final prefs = await SharedPreferences.getInstance();
     final payload = contacts.map((contact) => contact.toMap()).toList();
-    await prefs.setString('$_cacheKeyPrefix$userId', jsonEncode(payload));
+    await prefs.setString(
+      '$_cacheKeyPrefix$userId',
+      jsonEncode({
+        'expires_at': DateTime.now().add(_cacheTtl).toIso8601String(),
+        'contacts': payload,
+      }),
+    );
   }
 
-  Future<List<EmergencyContact>> _loadContactsCache(String userId) async {
+  Future<List<EmergencyContact>?> _loadContactsCache(
+    String userId, {
+    bool requireFresh = false,
+  }) async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString('$_cacheKeyPrefix$userId');
     if (raw == null || raw.trim().isEmpty) {
-      return const [];
+      return null;
     }
     try {
       final decoded = jsonDecode(raw);
-      if (decoded is! List) {
-        return const [];
+      if (decoded is List) {
+        final legacyContacts = decoded
+            .whereType<Map<String, dynamic>>()
+            .map(EmergencyContact.fromMap)
+            .toList();
+        if (legacyContacts.isEmpty) {
+          return null;
+        }
+        return legacyContacts;
       }
-      return decoded
+      if (decoded is! Map<String, dynamic>) {
+        return null;
+      }
+      final expiresRaw = decoded['expires_at'];
+      final contactsRaw = decoded['contacts'];
+      if (contactsRaw is! List) {
+        return null;
+      }
+      final contacts = contactsRaw
           .whereType<Map<String, dynamic>>()
           .map(EmergencyContact.fromMap)
           .toList();
+      final expiresAt = expiresRaw is String ? DateTime.tryParse(expiresRaw) : null;
+      if (requireFresh && expiresAt != null && DateTime.now().isAfter(expiresAt)) {
+        return null;
+      }
+      return contacts;
     } catch (_) {
-      return const [];
+      return null;
     }
+  }
+
+  List<EmergencyContact>? _getFreshMemoryCache(String userId) {
+    final expiresAt = _memoryCacheExpiresAt[userId];
+    final contacts = _memoryCache[userId];
+    if (expiresAt == null || contacts == null) {
+      return null;
+    }
+    if (DateTime.now().isAfter(expiresAt)) {
+      return null;
+    }
+    return contacts;
+  }
+
+  void _setMemoryCache(String userId, List<EmergencyContact> contacts) {
+    _memoryCache[userId] = List<EmergencyContact>.unmodifiable(contacts);
+    _memoryCacheExpiresAt[userId] = DateTime.now().add(_cacheTtl);
   }
 }

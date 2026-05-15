@@ -22,6 +22,7 @@ import '../services/device_settings_service.dart';
 import '../services/emergency_contacts_service.dart';
 import '../services/sos_alert_service.dart';
 import '../services/sos_recording_service.dart';
+import '../services/sos_trigger_cache_service.dart';
 import '../services/username_service.dart';
 import '../services/revenuecat_service.dart';
 import '../theme_mode_scope.dart';
@@ -55,11 +56,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   static const _hardwareSosShortcutKey = 'hardware_sos_shortcut_enabled';
   static const _activeSosSessionKey = 'active_sos_session_id';
   static const MethodChannel _hardwareSosChannel =
-      MethodChannel('aegixa/hardware_sos');
+      MethodChannel('sailor/hardware_sos');
 
   late int _currentIndex;
   final SosRecordingService _sosRecordingService = SosRecordingService();
   final SosAlertService _sosAlertService = SosAlertService();
+  final SosTriggerCacheService _sosTriggerCacheService =
+      SosTriggerCacheService();
+  final UsernameService _usernameService = UsernameService();
   bool _isSosActive = false;
   String? _activeSosRecordingPath;
   String? _activeSosVideoPath;
@@ -72,6 +76,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _isStoppingSos = false;
   int _sosHoldDuration = 2;
   String? _navProfilePhotoPath;
+  String? _currentUsername;
   DateTime? _lastBackPressedAt;
   StreamSubscription<Position>? _sosLocationSubscription;
   Position? _lastSharedSosPosition;
@@ -118,7 +123,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _initializeHardwareSosShortcut();
     _loadSosPreferences();
     _loadNavProfilePhoto();
+    _loadCurrentUsername();
+    _warmSosTriggerCache();
     _restoreSosStateIfNeeded();
+    unawaited(_retryOfflineOperations());
     if (_showOfflineBanner) {
       _startOfflineBannerProbe();
     }
@@ -127,6 +135,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    unawaited(_setShortcutListenerReady(false));
     _hardwareSosChannel.setMethodCallHandler(null);
     _offlineBannerProbeTimer?.cancel();
     _sosLocationSubscription?.cancel();
@@ -136,7 +145,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Reserved for future lifecycle handling
+    if (state == AppLifecycleState.resumed) {
+      // Re-warm SOS trigger cache every time the app comes back to foreground
+      // so the triple volume-down shortcut always has fresh cached data.
+      unawaited(_warmSosTriggerCache());
+      // Retry any queued offline SOS operations now that network may be back.
+      unawaited(_retryOfflineOperations());
+    }
   }
 
   void _startOfflineBannerProbe() {
@@ -188,7 +203,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     // Then try to fetch the remote profile photo in background.
     try {
       final remoteProfile =
-          await UsernameService().getPublicProfileForUserId(uid);
+          await _usernameService.getPublicProfileForUserId(uid);
       final remotePath = (remoteProfile?.profilePhotoPath ?? '').trim();
 
       // Use remote path if available, otherwise keep the cached local path.
@@ -205,6 +220,57 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       });
     } catch (_) {
       // Network error — keep using the cached photo (already set above).
+    }
+  }
+
+  Future<void> _loadCurrentUsername() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) {
+      return;
+    }
+
+    String? username;
+    try {
+      username = await _usernameService.getUsernameForUserId(uid);
+    } catch (_) {
+      username = null;
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _currentUsername = username;
+    });
+  }
+
+  Future<void> _warmSosTriggerCache() async {
+    await _sosTriggerCacheService.warmup(refreshPrecisePosition: true);
+  }
+
+  Future<void> _retryOfflineOperations() async {
+    try {
+      final hasQueued = await _sosAlertService.hasOfflineOperations();
+      if (!hasQueued) return;
+
+      final isOnline = await _hasInternetConnection();
+      if (!isOnline) return;
+
+      await _sosAlertService.retryOfflineOperations();
+
+      // Check if all queued operations were delivered
+      final stillQueued = await _sosAlertService.hasOfflineOperations();
+      if (!stillQueued && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Queued SOS alerts delivered successfully.'),
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (_) {
+      // Best-effort retry; will try again on next resume.
     }
   }
 
@@ -245,6 +311,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         }
         await _handleSosActivated();
       });
+      await _setShortcutListenerReady(true);
+      final pending = await _hardwareSosChannel.invokeMethod<bool>(
+            'consumePendingShortcutTrigger',
+          ) ??
+          false;
+      if (pending && mounted && !_isSosActive) {
+        await _handleSosActivated();
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _setShortcutListenerReady(bool ready) async {
+    try {
+      await _hardwareSosChannel.invokeMethod('setShortcutListenerReady', {
+        'ready': ready,
+      });
     } catch (_) {}
   }
 
@@ -280,14 +362,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final prefs = await SharedPreferences.getInstance();
     if ((sessionId ?? '').trim().isEmpty) {
       await prefs.remove(_activeSosSessionKey);
+      try {
+        await _hardwareSosChannel.invokeMethod('setActiveSosSessionId', {
+          'sessionId': null,
+        });
+      } catch (_) {}
       return;
     }
-    await prefs.setString(_activeSosSessionKey, sessionId!.trim());
+    final trimmedSessionId = sessionId!.trim();
+    await prefs.setString(_activeSosSessionKey, trimmedSessionId);
+    try {
+      await _hardwareSosChannel.invokeMethod('setActiveSosSessionId', {
+        'sessionId': trimmedSessionId,
+      });
+    } catch (_) {}
   }
 
   Future<void> _restoreSosStateIfNeeded() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      await _reconcileTaskRemovedSosState(prefs);
       final savedSessionId =
           (prefs.getString(_activeSosSessionKey) ?? '').trim();
       if (savedSessionId.isEmpty || !mounted) {
@@ -349,6 +443,46 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _reconcileTaskRemovedSosState(SharedPreferences prefs) async {
+    try {
+      final state = await _hardwareSosChannel
+          .invokeMapMethod<String, dynamic>('getTaskRemovedSosState');
+      if (state == null) {
+        return;
+      }
+
+      final sessionId = (state['sessionId'] ?? '').toString().trim();
+      final audioPath = (state['audioPath'] ?? '').toString().trim();
+      final videoPath = (state['videoPath'] ?? '').toString().trim();
+      if (sessionId.isEmpty && audioPath.isEmpty && videoPath.isEmpty) {
+        return;
+      }
+
+      if (audioPath.isNotEmpty) {
+        try {
+          await _sosRecordingService.saveNativeAudioEntry(audioPath);
+        } catch (_) {}
+      }
+      if (videoPath.isNotEmpty) {
+        try {
+          await _sosRecordingService.saveNativeVideoEntry(videoPath);
+        } catch (_) {}
+      }
+      if (sessionId.isNotEmpty) {
+        await _sosAlertService.resolveAlertSession(
+          sessionId: sessionId,
+          voiceRecordingPath: audioPath.isEmpty ? null : audioPath,
+          videoRecordingPath: videoPath.isEmpty ? null : videoPath,
+        );
+      }
+
+      await prefs.remove(_activeSosSessionKey);
+      await _hardwareSosChannel.invokeMethod('clearTaskRemovedSosState');
+    } catch (_) {
+      // Keep the native task-removed state for the next launch retry.
+    }
+  }
+
   Future<void> _stopSosForegroundService() async {
     try {
       await _hardwareSosChannel.invokeMethod('stopSosForegroundService');
@@ -356,19 +490,36 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _handleSosActivated() async {
+    var shortcutServicePrestarted = false;
+    var shortcutAudioPrestarted = false;
+    var dispatchCreated = false;
     try {
-      final contacts = await EmergencyContactsService().getContacts();
+      // Run all pre-dispatch lookups in parallel so the alert fires as fast
+      // as possible.  Every call here hits warmed in-memory caches when the
+      // cache service has been warmed (initState, app resume, auth gate).
+      final results = await Future.wait([
+        _consumeShortcutServicePrestart(),   // 0
+        _consumeShortcutAudioPrestart(),     // 1
+        _sosTriggerCacheService.getContacts(), // 2
+        _getFastSosPosition(),               // 3
+      ]);
+
+      shortcutServicePrestarted = results[0] as bool;
+      shortcutAudioPrestarted = results[1] as bool;
+      final contacts = results[2] as List<EmergencyContact>;
+      final initialPosition = results[3] as Position;
+
       if (contacts.isEmpty) {
         throw StateError(
             'Add at least one emergency contact before using SOS.');
       }
 
-      final initialPosition = await _getSosPosition();
       final dispatch = await _sosAlertService.triggerAlerts(
         contacts: contacts,
         position: initialPosition,
         alertMessage: _buildSosAlertMessage(),
       );
+      dispatchCreated = true;
 
       final shouldRecordVoice = _autoVoiceRecord || dispatch.deliveredCount > 0;
       final shouldRecordVideo = _autoVideoRecord || dispatch.deliveredCount > 0;
@@ -389,16 +540,41 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _activeSosSessionId = dispatch.sessionId;
       });
       await _persistActiveSosSession(dispatch.sessionId);
-      await _startSosForegroundService();
+      if (!shortcutServicePrestarted) {
+        await _startSosForegroundService();
+      }
 
       // Start native recordings via foreground service (survives app kill)
-      if (shouldRecordVoice) {
+      if (shouldRecordVoice && shortcutAudioPrestarted) {
+        try {
+          audioStarted = await _hardwareSosChannel
+                  .invokeMethod<bool>('isNativeAudioRecording') ??
+              false;
+          if (!audioStarted) {
+            await _hardwareSosChannel.invokeMethod('startNativeAudioRecording');
+            audioStarted = true;
+          }
+        } catch (_) {
+          audioStarted = false;
+        }
+      } else if (shouldRecordVoice) {
         try {
           await _hardwareSosChannel.invokeMethod('startNativeAudioRecording');
           audioStarted = true;
         } catch (_) {
           audioStarted = false;
         }
+      } else if (shortcutAudioPrestarted) {
+        try {
+          final isAudioActive = await _hardwareSosChannel
+                  .invokeMethod<bool>('isNativeAudioRecording') ??
+              false;
+          if (isAudioActive) {
+            await _hardwareSosChannel.invokeMethod<String>(
+              'stopNativeAudioRecording',
+            );
+          }
+        } catch (_) {}
       }
 
       if (shouldRecordVideo) {
@@ -418,26 +594,44 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
 
       await _startSosLocationSharing(dispatch.sessionId, initialPosition);
+      unawaited(_refreshSosLocationAfterActivation(dispatch.sessionId));
+      unawaited(_warmSosTriggerCache());
       if (!mounted) {
         return;
       }
-      final activationDetails = _buildSosActivatedMessage(
-        deliveredCount: dispatch.deliveredCount,
-        skippedCount: dispatch.skippedCount,
-        recordingStarted: audioStarted || videoStarted,
-        pushDeliveredCount: dispatch.pushDeliveredCount,
-        pushSkippedCount: dispatch.pushSkippedCount,
-        pushErrorMessage: dispatch.pushErrorMessage,
-      );
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Help is on the way. Stay calm and move to safety. $activationDetails',
+      if (dispatch.offlineQueued) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'SOS activated offline. Recording & location active. '
+              'Alerts will be delivered when internet returns.',
+            ),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 6),
           ),
-          backgroundColor: Colors.red,
-        ),
-      );
+        );
+      } else {
+        final activationDetails = _buildSosActivatedMessage(
+          deliveredCount: dispatch.deliveredCount,
+          skippedCount: dispatch.skippedCount,
+          recordingStarted: audioStarted || videoStarted,
+          pushDeliveredCount: dispatch.pushDeliveredCount,
+          pushSkippedCount: dispatch.pushSkippedCount,
+          pushErrorMessage: dispatch.pushErrorMessage,
+        );
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Help is on the way. Stay calm and move to safety. $activationDetails',
+            ),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     } catch (error) {
+      if (shortcutServicePrestarted && !dispatchCreated) {
+        await _stopSosForegroundService();
+      }
       if (!mounted) {
         return;
       }
@@ -447,6 +641,47 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           backgroundColor: Colors.red,
         ),
       );
+    }
+  }
+
+  Future<bool> _consumeShortcutServicePrestart() async {
+    try {
+      return await _hardwareSosChannel.invokeMethod<bool>(
+            'consumeShortcutServicePrestart',
+          ) ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> _consumeShortcutAudioPrestart() async {
+    try {
+      return await _hardwareSosChannel.invokeMethod<bool>(
+            'consumeShortcutAudioPrestart',
+          ) ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<Position> _getFastSosPosition() async {
+    return _sosTriggerCacheService.getBestAvailablePosition();
+  }
+
+  Future<void> _refreshSosLocationAfterActivation(String sessionId) async {
+    try {
+      final refreshed =
+          await _sosTriggerCacheService.refreshPrecisePositionCache();
+      await _sosAlertService.updateLiveLocation(
+        sessionId: sessionId,
+        position: refreshed,
+      );
+      _lastSharedSosPosition = refreshed;
+      _lastSharedSosAt = DateTime.now();
+    } catch (_) {
+      // Background location refresh is best-effort only.
     }
   }
 
@@ -534,11 +769,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     } finally {
       await _stopSosForegroundService();
       if (mounted) {
-        ScaffoldMessenger.of(context).hideCurrentSnackBar();
         setState(() {
           _activeSosRecordingPath = savedPath;
           _activeSosVideoPath = savedVideo;
         });
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -557,7 +792,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final email = (user?.email ?? '').trim();
     final label = name.isNotEmpty
         ? name
-        : (email.isNotEmpty ? email.split('@').first : 'Aegixa user');
+        : (email.isNotEmpty ? email.split('@').first : 'Sailor user');
     return 'PANIC ALERT: $label may be in immediate danger. Emergency SOS has been triggered and live location sharing is active. Respond now.';
   }
 
@@ -577,24 +812,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         : pushDeliveredCount > 0
             ? ' Panic notifications reached $pushDeliveredCount device${pushDeliveredCount == 1 ? '' : 's'}.'
             : pushSkippedCount > 0
-                ? ' Some contacts have not opened Aegixa with notifications enabled yet, so panic push could not reach $pushSkippedCount device${pushSkippedCount == 1 ? '' : 's'}.'
+                ? ' Some contacts have not opened Sailor with notifications enabled yet, so panic push could not reach $pushSkippedCount device${pushSkippedCount == 1 ? '' : 's'}.'
                 : '';
     if (skippedCount > 0) {
-      return 'SOS sent to $deliveredCount contact${deliveredCount == 1 ? '' : 's'} in-app. $skippedCount contact${skippedCount == 1 ? ' is' : 's are'} not linked to Aegixa yet.$recordingMessage$pushMessage';
+      return 'SOS sent to $deliveredCount contact${deliveredCount == 1 ? '' : 's'} in-app. $skippedCount contact${skippedCount == 1 ? ' is' : 's are'} not linked to Sailor yet.$recordingMessage$pushMessage';
     }
     return 'SOS sent to $deliveredCount contact${deliveredCount == 1 ? '' : 's'} in-app.$recordingMessage$pushMessage';
-  }
-
-  Future<Position> _getSosPosition() async {
-    final cached = await Geolocator.getLastKnownPosition();
-    try {
-      return await _getCurrentPositionWithOfflineFallback();
-    } catch (_) {
-      if (cached != null) {
-        return cached;
-      }
-      rethrow;
-    }
   }
 
   Future<Position> _getCurrentPositionWithOfflineFallback() async {
@@ -787,6 +1010,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   ),
                   _ProfileTab(
                     user: user,
+                    initialUsername: _currentUsername,
                     onProfilePhotoChanged: (path) {
                       setState(() {
                         _navProfilePhotoPath = path;
@@ -795,6 +1019,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   ),
                   _SettingsTab(
                     user: user,
+                    username: _currentUsername,
                     themeModeController: themeModeController,
                     onOpenEmergencyContacts: () {
                       setState(() => _currentIndex = 2);
@@ -2200,7 +2425,7 @@ class _LiveMapTabState extends State<_LiveMapTab> with WidgetsBindingObserver {
     final uri =
         Uri.https('overpass-api.de', '/api/interpreter', {'data': query});
     final response = await http.get(uri, headers: {
-      'User-Agent': 'Aegixa/1.0 (safety app)',
+      'User-Agent': 'Sailor/1.0 (safety app)',
       'Accept': 'application/json',
     }).timeout(_stationsFetchTimeout);
 
@@ -2486,9 +2711,9 @@ out body;
     final uri =
         Uri.https('overpass-api.de', '/api/interpreter', {'data': query});
     final response = await http.get(uri, headers: {
-      'User-Agent': 'Aegixa/1.0 (safety app)',
+      'User-Agent': 'Sailor/1.0 (safety app)',
       'Accept': 'application/json',
-    });
+    }).timeout(const Duration(seconds: 10));
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
       return const _WalkingGraph(nodes: {}, adjacency: {});
@@ -3000,11 +3225,15 @@ out body;
         children: [
           TileLayer(
             urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-            userAgentPackageName: 'com.example.aegixa',
+            userAgentPackageName: 'com.example.sailor',
             retinaMode: RetinaMode.isHighDensity(context),
             maxNativeZoom: 19,
             keepBuffer: 8,
             panBuffer: 4,
+            errorTileCallback: (tile, error, stackTrace) {
+              // Silently swallow tile-fetch failures (offline / flaky network).
+              // flutter_map renders transparent placeholders automatically.
+            },
           ),
           if (routePoints.length >= 2 &&
               routePoints
@@ -3344,6 +3573,8 @@ class _EmergencyContactsTabState extends State<_EmergencyContactsTab> {
       context,
       contact: contact,
       suggestPrimary: _contacts.isEmpty,
+      currentUserUid: FirebaseAuth.instance.currentUser?.uid,
+      existingContacts: _contacts,
       onSave: _service.saveContact,
     );
     if (!mounted || !didSave) return;
@@ -3367,7 +3598,7 @@ class _EmergencyContactsTabState extends State<_EmergencyContactsTab> {
 
     if (_isLoading) {
       return const Center(
-        child: AegixaLoader(),
+        child: SailorLoader(),
       );
     }
 
@@ -3417,8 +3648,19 @@ class _EmergencyContactsTabState extends State<_EmergencyContactsTab> {
                 onCall: () => _callContact(contact.phoneNumber),
                 onEdit: () => _openContactSheet(contact: contact),
                 onDelete: () async {
-                  await _service.deleteContact(contact.id!);
-                  await _loadContacts();
+                  try {
+                    await _service.deleteContact(contact.id!);
+                    await _loadContacts();
+                  } catch (_) {
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                            'Could not delete contact. Please check your connection.'),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                  }
                 },
               ),
             ),
@@ -3645,10 +3887,12 @@ class _ProfileMetaChip extends StatelessWidget {
 class _ProfileTab extends StatefulWidget {
   const _ProfileTab({
     required this.user,
+    required this.initialUsername,
     required this.onProfilePhotoChanged,
   });
 
   final User? user;
+  final String? initialUsername;
   final ValueChanged<String?> onProfilePhotoChanged;
 
   @override
@@ -3687,9 +3931,20 @@ class _ProfileTabState extends State<_ProfileTab> {
   @override
   void initState() {
     super.initState();
+    _username = widget.initialUsername;
     _loadContacts();
-    _loadUsername();
     _loadProfilePhoto();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ProfileTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialUsername != widget.initialUsername &&
+        widget.initialUsername != _username) {
+      setState(() {
+        _username = widget.initialUsername;
+      });
+    }
   }
 
   Future<void> _loadProfilePhoto() async {
@@ -3853,25 +4108,6 @@ class _ProfileTabState extends State<_ProfileTab> {
     widget.onProfilePhotoChanged(finalPath);
   }
 
-  Future<void> _loadUsername() async {
-    final userId = widget.user?.uid;
-    if (userId == null) {
-      return;
-    }
-    String? username;
-    try {
-      username = await _usernameService.getUsernameForUserId(userId);
-    } catch (_) {
-      username = null;
-    }
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _username = username;
-    });
-  }
-
   Future<void> _loadContacts() async {
     try {
       final contacts = await _service.getContacts();
@@ -3911,36 +4147,49 @@ class _ProfileTabState extends State<_ProfileTab> {
   Future<List<EmergencyContact>> _syncContactProfilePhotos(
     List<EmergencyContact> contacts,
   ) async {
-    final updated = <EmergencyContact>[];
+    final usernames = contacts
+        .map((contact) => (contact.username ?? '').trim())
+        .where((username) => username.isNotEmpty)
+        .toSet()
+        .toList();
+    if (usernames.isEmpty) {
+      return contacts;
+    }
+
+    Map<String, SailorPublicProfile> profilesByUsername;
+    try {
+      profilesByUsername = await _usernameService
+          .getPublicProfilesForUsernames(usernames)
+          .timeout(
+            const Duration(seconds: 2),
+            onTimeout: () => const <String, SailorPublicProfile>{},
+          );
+    } catch (_) {
+      return contacts;
+    }
+
+      final updated = <EmergencyContact>[];
+      final contactsToPersist = <EmergencyContact>[];
     for (final contact in contacts) {
       final username = (contact.username ?? '').trim();
-      if (username.isEmpty) {
-        updated.add(contact);
-        continue;
-      }
-
-      try {
-        // Use direct profile lookup instead of searchUsers, which can
-        // silently fail to enrich the photo_path field.
-        final profile = await _usernameService
-            .getPublicProfileForUsername(username)
-            .timeout(const Duration(seconds: 2), onTimeout: () => null);
-        final remotePhoto = (profile?.profilePhotoPath ?? '').trim();
-        final currentPhoto = (contact.profilePhotoPath ?? '').trim();
-
-        // Only update if remote has a real photo; never overwrite a valid
-        // photo with an empty string (e.g. when the lookup returns no match).
-        if (remotePhoto.isNotEmpty && remotePhoto != currentPhoto) {
-          final merged = contact.copyWith(profilePhotoPath: remotePhoto);
-          await _service.saveContact(merged);
-          updated.add(merged);
-        } else {
-          updated.add(contact);
-        }
-      } catch (_) {
+      final remotePhoto =
+          (profilesByUsername[username]?.profilePhotoPath ?? '').trim();
+      final currentPhoto = (contact.profilePhotoPath ?? '').trim();
+      if (remotePhoto.isNotEmpty && remotePhoto != currentPhoto) {
+        final merged = contact.copyWith(profilePhotoPath: remotePhoto);
+        updated.add(merged);
+        contactsToPersist.add(merged);
+      } else {
         updated.add(contact);
       }
     }
+
+    for (final contact in contactsToPersist) {
+      try {
+        await _service.saveContact(contact);
+      } catch (_) {}
+    }
+
     return updated;
   }
 
@@ -3979,7 +4228,7 @@ class _ProfileTabState extends State<_ProfileTab> {
     if ((user?.email ?? '').trim().isNotEmpty) {
       return user!.email!.split('@').first;
     }
-    return 'Aegixa User';
+    return 'Sailor User';
   }
 
   String _profileInitials() {
@@ -4182,8 +4431,8 @@ class _ProfileTabState extends State<_ProfileTab> {
               if (_isLoadingContacts)
                 const Center(
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 32),
-                    child: AegixaLoader(),
+                    padding: EdgeInsets.symmetric(vertical: 32),
+                    child: SailorLoader(),
                   ),
                 )
               else if (_contacts.isEmpty)
@@ -4205,8 +4454,19 @@ class _ProfileTabState extends State<_ProfileTab> {
                       onCall: () => _callContact(contact.phoneNumber),
                       onEdit: () => _openContactSheet(contact: contact),
                       onDelete: () async {
-                        await _service.deleteContact(contact.id!);
-                        await _loadContacts();
+                        try {
+                          await _service.deleteContact(contact.id!);
+                          await _loadContacts();
+                        } catch (_) {
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                  'Could not delete contact. Please check your connection.'),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                        }
                       },
                     ),
                   ),
@@ -4222,6 +4482,7 @@ class _ProfileTabState extends State<_ProfileTab> {
 class _SettingsTab extends StatelessWidget {
   const _SettingsTab({
     required this.user,
+    required this.username,
     required this.themeModeController,
     required this.onOpenEmergencyContacts,
     required this.onOpenSosInbox,
@@ -4243,6 +4504,7 @@ class _SettingsTab extends StatelessWidget {
   });
 
   final User? user;
+  final String? username;
   final ValueNotifier<ThemeMode> themeModeController;
   final VoidCallback onOpenEmergencyContacts;
   final VoidCallback onOpenSosInbox;
@@ -4292,80 +4554,71 @@ class _SettingsTab extends StatelessWidget {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (sheetContext) {
-        return FutureBuilder<String?>(
-          future: UsernameService().getUsernameForUserId(currentUser.uid),
-          builder: (context, snapshot) {
-            final username = snapshot.data;
-            return SafeArea(
-              top: false,
-              child: Container(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.surface,
-                  borderRadius:
-                      const BorderRadius.vertical(top: Radius.circular(24)),
-                  border: Border.all(
-                    color: isDark
-                        ? const Color(0xFF2A2A2A)
-                        : const Color(0xFFE5E7EB),
+        return SafeArea(
+          top: false,
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surface,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+              border: Border.all(
+                color:
+                    isDark ? const Color(0xFF2A2A2A) : const Color(0xFFE5E7EB),
+              ),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 42,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? const Color(0xFF3A3A3A)
+                          : const Color(0xFFD1D5DB),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
                   ),
                 ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Center(
-                      child: Container(
-                        width: 42,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          color: isDark
-                              ? const Color(0xFF3A3A3A)
-                              : const Color(0xFFD1D5DB),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Account details',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
-                        color: theme.colorScheme.onSurface,
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    _buildAccountRow(
-                        context,
-                        'Username',
-                        (username?.isNotEmpty ?? false)
-                            ? '@$username'
-                            : 'Not set'),
-                    _buildAccountRow(
-                        context, 'Name', currentUser.displayName ?? 'Not set'),
-                    _buildAccountRow(
-                        context, 'Email', currentUser.email ?? 'Not linked'),
-                    _buildAccountRow(context, 'Phone',
-                        currentUser.phoneNumber ?? 'Not linked'),
-                    const SizedBox(height: 14),
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton(
-                        onPressed: () => Navigator.of(sheetContext).pop(),
-                        style: FilledButton.styleFrom(
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        child: const Text('Done'),
-                      ),
-                    ),
-                  ],
+                const SizedBox(height: 16),
+                Text(
+                  'Account details',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                    color: theme.colorScheme.onSurface,
+                  ),
                 ),
-              ),
-            );
-          },
+                const SizedBox(height: 14),
+                _buildAccountRow(
+                  context,
+                  'Username',
+                  (username?.isNotEmpty ?? false) ? '@$username' : 'Not set',
+                ),
+                _buildAccountRow(
+                    context, 'Name', currentUser.displayName ?? 'Not set'),
+                _buildAccountRow(
+                    context, 'Email', currentUser.email ?? 'Not linked'),
+                _buildAccountRow(
+                    context, 'Phone', currentUser.phoneNumber ?? 'Not linked'),
+                const SizedBox(height: 14),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: () => Navigator.of(sheetContext).pop(),
+                    style: FilledButton.styleFrom(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text('Done'),
+                  ),
+                ),
+              ],
+            ),
+          ),
         );
       },
     );

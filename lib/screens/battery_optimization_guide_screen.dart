@@ -22,8 +22,8 @@ class _BatteryOptimizationGuideScreenState
       icon: Icons.phone_android_outlined,
       steps: [
         'Open Settings > Battery > Background usage limits.',
-        'Remove Aegixa from Sleeping apps and Deep sleeping apps.',
-        'Open Settings > Apps > Aegixa > Battery.',
+        'Remove Sailor from Sleeping apps and Deep sleeping apps.',
+        'Open Settings > Apps > Sailor > Battery.',
         'Set battery usage to Unrestricted.',
       ],
     ),
@@ -32,10 +32,10 @@ class _BatteryOptimizationGuideScreenState
       matchers: ['xiaomi', 'redmi', 'poco', 'miui'],
       icon: Icons.bolt_outlined,
       steps: [
-        'Open Settings > Apps > Manage apps > Aegixa.',
+        'Open Settings > Apps > Manage apps > Sailor.',
         'Open Autostart and allow it.',
         'Open Battery saver and choose No restrictions.',
-        'In Recent apps, lock Aegixa so MIUI does not clear it.',
+        'In Recent apps, lock Sailor so MIUI does not clear it.',
       ],
     ),
     _OemGuideSection(
@@ -43,7 +43,7 @@ class _BatteryOptimizationGuideScreenState
       matchers: ['oneplus', 'oppo', 'realme', 'coloros'],
       icon: Icons.notifications_active_outlined,
       steps: [
-        'Open Settings > Apps > App management > Aegixa.',
+        'Open Settings > Apps > App management > Sailor.',
         'Open Battery usage or Battery.',
         'Allow background activity and set optimization to Don\'t optimize.',
         'If available, enable Auto-launch or Auto start.',
@@ -54,10 +54,10 @@ class _BatteryOptimizationGuideScreenState
       matchers: ['vivo', 'iqoo'],
       icon: Icons.flash_on_outlined,
       steps: [
-        'Open i Manager or Settings > Apps > Aegixa.',
-        'Enable Autostart for Aegixa.',
+        'Open i Manager or Settings > Apps > Sailor.',
+        'Enable Autostart for Sailor.',
         'Open Battery > High background power consumption.',
-        'Allow Aegixa to run in the background without restrictions.',
+        'Allow Sailor to run in the background without restrictions.',
       ],
     ),
     _OemGuideSection(
@@ -65,10 +65,10 @@ class _BatteryOptimizationGuideScreenState
       matchers: ['huawei', 'honor'],
       icon: Icons.security_outlined,
       steps: [
-        'Open Settings > Apps > Launch > Aegixa.',
+        'Open Settings > Apps > Launch > Sailor.',
         'Disable Manage automatically.',
         'Enable Auto-launch, Secondary launch, and Run in background.',
-        'Open Battery > App launch and confirm Aegixa stays allowed.',
+        'Open Battery > App launch and confirm Sailor stays allowed.',
       ],
     ),
     _OemGuideSection(
@@ -76,10 +76,10 @@ class _BatteryOptimizationGuideScreenState
       matchers: ['google', 'pixel', 'motorola', 'moto', 'nokia'],
       icon: Icons.settings_cell_outlined,
       steps: [
-        'Open Settings > Apps > Aegixa > App battery usage.',
+        'Open Settings > Apps > Sailor > App battery usage.',
         'Set battery mode to Unrestricted.',
         'Open Notifications and make sure panic alerts are enabled.',
-        'If alerts still delay, also allow Aegixa in system battery optimization settings.',
+        'If alerts still delay, also allow Sailor in system battery optimization settings.',
       ],
     ),
   ];
@@ -190,7 +190,7 @@ class _BatteryOptimizationGuideScreenState
                 Text(
                   detected == null
                       ? 'Many Android brands delay emergency notifications unless the app is allowed to auto start and run without battery restrictions. Use the steps below for your phone brand.'
-                      : 'Aegixa detected ${_detectedLabel ?? 'your Android device'} and moved the most relevant guide to the top. Review that section first, then use the battery settings shortcut below.',
+                      : 'Sailor detected ${_detectedLabel ?? 'your Android device'} and moved the most relevant guide to the top. Review that section first, then use the battery settings shortcut below.',
                   style: const TextStyle(
                     height: 1.45,
                     color: Color(0xFFA3A3A3),

@@ -53,15 +53,22 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
     if (user == null) return;
 
     setState(() => _refreshing = true);
-    await user.reload();
-    final refreshed = FirebaseAuth.instance.currentUser;
-    if ((refreshed?.emailVerified ?? false) && mounted) {
-      _showMessage('Email verified. Welcome!');
-    } else {
-      _showMessage('Email not verified yet. Please check your mail.',
+    try {
+      await user.reload();
+      final refreshed = FirebaseAuth.instance.currentUser;
+      if ((refreshed?.emailVerified ?? false) && mounted) {
+        _showMessage('Email verified. Welcome!');
+      } else {
+        _showMessage('Email not verified yet. Please check your mail.',
+            isError: true);
+      }
+    } catch (_) {
+      _showMessage(
+          'Could not check verification status. Please check your internet connection.',
           isError: true);
+    } finally {
+      if (mounted) setState(() => _refreshing = false);
     }
-    if (mounted) setState(() => _refreshing = false);
   }
 
   @override

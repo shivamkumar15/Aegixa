@@ -102,8 +102,13 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
   }
 
   Future<void> _loadSavedProfileDetails() async {
-    final remoteProfile =
-        await _service.getPublicProfileForUserId(widget.user.uid);
+    SailorPublicProfile? remoteProfile;
+    try {
+      remoteProfile =
+          await _service.getPublicProfileForUserId(widget.user.uid);
+    } catch (_) {
+      // Offline or network error — fall through to SharedPreferences fallback.
+    }
     final prefs = await SharedPreferences.getInstance();
     final savedDob = (remoteProfile?.dateOfBirth ??
             prefs.getString('profile_dob_${widget.user.uid}') ??
@@ -149,7 +154,7 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
     final email = (widget.user.email ?? '').trim();
     final base = displayName.isNotEmpty
         ? displayName
-        : (email.isNotEmpty ? email.split('@').first : 'aegixa_user');
+        : (email.isNotEmpty ? email.split('@').first : 'sailor_user');
     return _service.normalizeForInput(base);
   }
 

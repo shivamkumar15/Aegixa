@@ -1,4 +1,4 @@
-package com.example.aegixa
+package com.example.sailor
 
 import android.os.SystemClock
 import android.provider.Settings
@@ -9,19 +9,22 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     companion object {
-        const val ACTION_TRIGGER_SOS_SHORTCUT = "com.example.aegixa.TRIGGER_SOS_SHORTCUT"
+        const val ACTION_TRIGGER_SOS_SHORTCUT = "com.example.sailor.TRIGGER_SOS_SHORTCUT"
     }
 
     private var hardwareSosChannel: MethodChannel? = null
     private var hardwareShortcutEnabled: Boolean = true
     private val volumeDownPressTimesMs = ArrayDeque<Long>()
     private var pendingShortcutTrigger: Boolean = false
+    private var shortcutListenerReady: Boolean = false
+    private var shortcutServicePrestarted: Boolean = false
+    private var shortcutAudioPrestarted: Boolean = false
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         hardwareSosChannel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
-            "aegixa/hardware_sos"
+            "sailor/hardware_sos"
         ).apply {
             setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -38,6 +41,54 @@ class MainActivity : FlutterActivity() {
 
                     "isAccessibilityEnabled" -> {
                         result.success(isSosAccessibilityServiceEnabled())
+                    }
+
+                    "setShortcutListenerReady" -> {
+                        val readyArg = call.argument<Boolean>("ready")
+                        shortcutListenerReady = readyArg == true
+                        if (shortcutListenerReady) {
+                            maybeDispatchPendingShortcutTrigger()
+                        }
+                        result.success(null)
+                    }
+
+                    "hasPendingShortcutTrigger" -> {
+                        result.success(pendingShortcutTrigger)
+                    }
+
+                    "consumePendingShortcutTrigger" -> {
+                        val pending = pendingShortcutTrigger
+                        pendingShortcutTrigger = false
+                        result.success(pending)
+                    }
+
+                    "consumeShortcutServicePrestart" -> {
+                        val prestarted = shortcutServicePrestarted
+                        shortcutServicePrestarted = false
+                        result.success(prestarted)
+                    }
+
+                    "consumeShortcutAudioPrestart" -> {
+                        val prestarted = shortcutAudioPrestarted
+                        shortcutAudioPrestarted = false
+                        result.success(prestarted)
+                    }
+
+                    "setActiveSosSessionId" -> {
+                        SosForegroundService.setActiveSessionId(
+                            this@MainActivity,
+                            call.argument<String>("sessionId")
+                        )
+                        result.success(null)
+                    }
+
+                    "getTaskRemovedSosState" -> {
+                        result.success(SosForegroundService.getTaskRemovedState(this@MainActivity))
+                    }
+
+                    "clearTaskRemovedSosState" -> {
+                        SosForegroundService.clearTaskRemovedState(this@MainActivity)
+                        result.success(null)
                     }
 
                     "startSosForegroundService" -> {
@@ -104,14 +155,12 @@ class MainActivity : FlutterActivity() {
         }
 
         handleShortcutIntent(intent)
-        maybeDispatchPendingShortcutTrigger()
     }
 
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         handleShortcutIntent(intent)
-        maybeDispatchPendingShortcutTrigger()
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -135,7 +184,7 @@ class MainActivity : FlutterActivity() {
 
             if (volumeDownPressTimesMs.size >= 3) {
                 volumeDownPressTimesMs.clear()
-                triggerShortcut()
+                queueShortcutTrigger()
                 return true
             }
         }
@@ -147,12 +196,19 @@ class MainActivity : FlutterActivity() {
         if (intent?.action != ACTION_TRIGGER_SOS_SHORTCUT) {
             return
         }
-        pendingShortcutTrigger = true
+        queueShortcutTrigger()
         intent.action = null
     }
 
+    private fun queueShortcutTrigger() {
+        maybeStartShortcutForegroundService()
+        maybeStartShortcutAudioRecording()
+        pendingShortcutTrigger = true
+        maybeDispatchPendingShortcutTrigger()
+    }
+
     private fun maybeDispatchPendingShortcutTrigger() {
-        if (!pendingShortcutTrigger) {
+        if (!pendingShortcutTrigger || !shortcutListenerReady) {
             return
         }
         triggerShortcut()
@@ -164,6 +220,22 @@ class MainActivity : FlutterActivity() {
             "onShortcutTriggered",
             mapOf("type" to "volume_down_triple_press")
         )
+    }
+
+    private fun maybeStartShortcutForegroundService() {
+        if (SosForegroundService.isRunning(this)) {
+            return
+        }
+        SosForegroundService.start(this)
+        shortcutServicePrestarted = true
+    }
+
+    private fun maybeStartShortcutAudioRecording() {
+        if (SosForegroundService.isAudioRecording(this)) {
+            return
+        }
+        SosForegroundService.startAudioRecording(this)
+        shortcutAudioPrestarted = true
     }
 
     private fun isSosAccessibilityServiceEnabled(): Boolean {

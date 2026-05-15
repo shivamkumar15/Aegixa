@@ -191,7 +191,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   const SizedBox(height: 0),
-                  // Logo
                   Hero(
                     tag: 'app_logo',
                     child: Image.asset(
@@ -201,7 +200,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  // Title
                   Text(
                     'Create Account',
                     style: TextStyle(
@@ -212,8 +210,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
                     ),
                   ),
                   const SizedBox(height: 15),
-
-                  // Email Field
                   buildRoundedTextField(
                     context: context,
                     controller: _emailController,
@@ -224,8 +220,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
                     keyboardType: TextInputType.emailAddress,
                   ),
                   const SizedBox(height: 12),
-
-                  // Password Field
                   buildRoundedTextField(
                     context: context,
                     controller: _passwordController,
@@ -248,8 +242,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
-
-                  // Confirm Password Field
                   buildRoundedTextField(
                     context: context,
                     controller: _confirmPasswordController,
@@ -272,10 +264,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                           _obscureConfirmPassword = !_obscureConfirmPassword),
                     ),
                   ),
-
                   const SizedBox(height: 20),
-
-                  // Password Rules
                   Align(
                     alignment: Alignment.centerLeft,
                     child: Wrap(
@@ -291,20 +280,14 @@ class _SignUpScreenState extends State<SignUpScreen> {
                       ],
                     ),
                   ),
-
                   const SizedBox(height: 30),
-
-                  // Sign Up Button
                   buildPrimaryButton(
                     context: context,
                     label: 'Sign Up',
                     onPressed: _isLoading ? null : _signUpWithEmail,
                     isLoading: _loadingProvider == 'email',
                   ),
-
                   const SizedBox(height: 20),
-
-                  // Or login with
                   Row(
                     children: [
                       Expanded(
@@ -328,10 +311,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                                   isDark ? Colors.white10 : Colors.grey[300])),
                     ],
                   ),
-
                   const SizedBox(height: 16),
-
-                  // Social Buttons Row
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
@@ -368,10 +348,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                       ],
                     ],
                   ),
-
                   const SizedBox(height: 15),
-
-                  // Log in link
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [

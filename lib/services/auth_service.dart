@@ -213,7 +213,12 @@ class AuthService {
     // the session may not be fully invalidated.
     String? signOutError;
 
-    await _auth.signOut();
+    try {
+      await _auth.signOut();
+    } catch (e) {
+      signOutError = 'Firebase sign-out failed: $e';
+      debugPrint('Firebase sign-out failed: $e');
+    }
 
     try {
       await GoogleSignIn().signOut();

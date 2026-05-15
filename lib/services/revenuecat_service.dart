@@ -7,7 +7,7 @@ class RevenueCatService {
 
   static const String _apiKey = String.fromEnvironment(
     'REVENUECAT_API_KEY',
-    defaultValue: 'test_lGjIcigiVuuPcSbcEEuQaNywoak',
+    defaultValue: '',
   );
 
   static bool _isConfigured = false;
@@ -17,10 +17,15 @@ class RevenueCatService {
       return;
     }
 
-    await Purchases.setLogLevel(kDebugMode ? LogLevel.debug : LogLevel.info);
-    final configuration = PurchasesConfiguration(_apiKey);
-    await Purchases.configure(configuration);
-    _isConfigured = true;
+    try {
+      await Purchases.setLogLevel(kDebugMode ? LogLevel.debug : LogLevel.info);
+      final configuration = PurchasesConfiguration(_apiKey);
+      await Purchases.configure(configuration);
+      _isConfigured = true;
+    } catch (e) {
+      debugPrint('RevenueCat initialization failed: $e');
+      // Leave _isConfigured false so next presentPaywall() retries.
+    }
   }
 
   static Future<PaywallResult> presentPaywall() async {

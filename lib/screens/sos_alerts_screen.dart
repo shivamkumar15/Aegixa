@@ -36,7 +36,7 @@ class SosAlertsScreen extends StatelessWidget {
 
           if (!snapshot.hasData) {
             return const Center(
-              child: AegixaLoader(),
+              child: SailorLoader(),
             );
           }
 

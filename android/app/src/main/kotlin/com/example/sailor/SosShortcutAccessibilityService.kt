@@ -1,4 +1,4 @@
-package com.example.aegixa
+package com.example.sailor
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo

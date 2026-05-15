@@ -30,7 +30,7 @@ Deno.serve(async (request: Request) => {
   // Mobile apps don't send Origin headers, so CORS is mainly relevant for
   // web/debug usage. Restrict to the Supabase project URL rather than '*'.
   const ALLOWED_ORIGINS = [
-    Deno.env.get('SUPABASE_URL') ?? 'https://ilwxanuvttrhxkgmaphq.supabase.co',
+    Deno.env.get('SUPABASE_URL') ?? '',
   ]
   const origin = request.headers.get('Origin') ?? ''
   const allowedOrigin = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]

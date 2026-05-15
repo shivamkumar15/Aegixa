@@ -95,6 +95,33 @@ class SosAlert {
           : DateTime.parse(map['resolved_at'].toString()),
     );
   }
+
+  Map<String, Object?> toMap() {
+    return {
+      'id': id,
+      'session_id': sessionId,
+      'sender_user_id': senderUserId,
+      'sender_name': senderName,
+      'sender_username': senderUsername,
+      'sender_phone_number': senderPhoneNumber,
+      'sender_photo_path': senderPhotoPath,
+      'recipient_user_id': recipientUserId,
+      'recipient_username': recipientUsername,
+      'contact_name': contactName,
+      'contact_phone_number': contactPhoneNumber,
+      'is_primary': isPrimary,
+      'alert_message': alertMessage,
+      'latitude': latitude,
+      'longitude': longitude,
+      'location_accuracy_meters': locationAccuracyMeters,
+      'status': status,
+      'voice_recording_url': voiceRecordingUrl,
+      'video_recording_url': videoRecordingUrl,
+      'triggered_at': triggeredAt.toIso8601String(),
+      'updated_at': updatedAt.toIso8601String(),
+      'resolved_at': resolvedAt?.toIso8601String(),
+    };
+  }
 }
 
 class SosAlertDispatchSummary {
@@ -106,6 +133,7 @@ class SosAlertDispatchSummary {
     required this.pushDeliveredCount,
     required this.pushSkippedCount,
     this.pushErrorMessage,
+    this.offlineQueued = false,
   });
 
   final String sessionId;
@@ -115,6 +143,7 @@ class SosAlertDispatchSummary {
   final int pushDeliveredCount;
   final int pushSkippedCount;
   final String? pushErrorMessage;
+  final bool offlineQueued;
 }
 
 class _PushDispatchSummary {
@@ -141,6 +170,12 @@ class SosAlertService {
       'downloaded_sos_voice_recordings_v1';
   static const _downloadedVideoRecordingsKey =
       'downloaded_sos_video_recordings_v1';
+  static const _receivedAlertsCacheKeyPrefix = 'received_sos_alerts_cache_v1_';
+  static const Duration _receivedAlertsCacheTtl = Duration(minutes: 5);
+
+  // Offline operation queue keys
+  static const _offlineTriggerQueueKey = 'offline_sos_trigger_queue_v1';
+  static const _offlineResolveQueueKey = 'offline_sos_resolve_queue_v1';
 
   final SupabaseClient _supabase = Supabase.instance.client;
   final UsernameService _usernameService = UsernameService();
@@ -186,101 +221,95 @@ class SosAlertService {
     required Position position,
     required String alertMessage,
   }) async {
-    try {
-      // Rate limiting: prevent SOS flooding
-      final now = DateTime.now();
-      if (_lastSosTriggeredAt != null &&
-          now.difference(_lastSosTriggeredAt!) < _sosCooldown) {
-        final remaining =
-            _sosCooldown.inSeconds - now.difference(_lastSosTriggeredAt!).inSeconds;
-        throw StateError(
-          'Please wait $remaining seconds before sending another SOS alert.',
-        );
-      }
-
-      final currentUserId = _currentUserId;
-      final senderProfile =
-          await _usernameService.getPublicProfileForUserId(currentUserId);
-      final senderName = _sanitizeText(
-        _resolveSenderName(senderProfile),
-        _maxNameLength,
+    // Rate limiting: prevent SOS flooding
+    final now = DateTime.now();
+    if (_lastSosTriggeredAt != null &&
+        now.difference(_lastSosTriggeredAt!) < _sosCooldown) {
+      final remaining =
+          _sosCooldown.inSeconds - now.difference(_lastSosTriggeredAt!).inSeconds;
+      throw StateError(
+        'Please wait $remaining seconds before sending another SOS alert.',
       );
-      // Use cryptographically random session ID instead of predictable timestamp
-      final sessionId = _generateSessionId(currentUserId);
+    }
 
-      // Sanitize alert message
-      final sanitizedMessage = _sanitizeText(alertMessage, _maxAlertMessageLength);
+    final currentUserId = _currentUserId;
+    final senderProfile =
+        await _usernameService.getPublicProfileForUserId(currentUserId);
+    final senderName = _sanitizeText(
+      _resolveSenderName(senderProfile),
+      _maxNameLength,
+    );
+    // Use cryptographically random session ID instead of predictable timestamp
+    final sessionId = _generateSessionId(currentUserId);
 
-      final usernames = contacts
-          .map((contact) => (contact.username ?? '').trim())
-          .where((username) => username.isNotEmpty)
-          .toSet()
-          .toList();
+    // Sanitize alert message
+    final sanitizedMessage = _sanitizeText(alertMessage, _maxAlertMessageLength);
 
-      if (usernames.isEmpty) {
-        throw StateError(
-          'No emergency contacts are linked to Aegixa accounts yet. Add contacts with usernames to use in-app SOS alerts.',
-        );
+    final usernames = contacts
+        .map((contact) => (contact.username ?? '').trim())
+        .where((username) => username.isNotEmpty)
+        .toSet()
+        .toList();
+
+    if (usernames.isEmpty) {
+      throw StateError(
+        'No emergency contacts are linked to Sailor accounts yet. Add contacts with usernames to use in-app SOS alerts.',
+      );
+    }
+
+    // getPublicProfilesForUsernames uses cache, works offline if warmed.
+    final profileByUsername =
+        await _usernameService.getPublicProfilesForUsernames(usernames);
+
+    final rows = <Map<String, Object?>>[];
+    var deliveredCount = 0;
+    var skippedCount = 0;
+    var hasPrimaryRecipient = false;
+
+    for (final contact in contacts) {
+      final username = (contact.username ?? '').trim();
+      final profile = profileByUsername[username];
+      final recipientUserId = profile?.uid.trim() ?? '';
+      if (username.isEmpty ||
+          recipientUserId.isEmpty ||
+          recipientUserId == currentUserId) {
+        skippedCount++;
+        continue;
       }
 
-      final profileRows = await _supabase
-          .from('public_profiles')
-          .select('uid,username')
-          .inFilter('username', usernames);
-
-      final profileByUsername = <String, Map<String, dynamic>>{};
-      for (final row in profileRows.whereType<Map<String, dynamic>>()) {
-        final username = (row['username'] ?? '').toString().trim();
-        if (username.isNotEmpty) {
-          profileByUsername[username] = row;
-        }
+      rows.add({
+        'session_id': sessionId,
+        'sender_user_id': currentUserId,
+        'sender_name': senderName,
+        'sender_username': senderProfile?.username,
+        'sender_phone_number': senderProfile?.phoneNumber,
+        'sender_photo_path': senderProfile?.profilePhotoPath,
+        'recipient_user_id': recipientUserId,
+        'recipient_username': username,
+        'contact_name': _sanitizeText(contact.name, _maxNameLength),
+        'contact_phone_number': _sanitizeText(contact.phoneNumber, 20),
+        'is_primary': contact.isPrimary,
+        'alert_message': sanitizedMessage,
+        'latitude': position.latitude,
+        'longitude': position.longitude,
+        'location_accuracy_meters': position.accuracy,
+      });
+      deliveredCount++;
+      if (contact.isPrimary) {
+        hasPrimaryRecipient = true;
       }
+    }
 
-      final rows = <Map<String, Object?>>[];
-      var deliveredCount = 0;
-      var skippedCount = 0;
-      var hasPrimaryRecipient = false;
+    if (rows.isEmpty) {
+      throw StateError(
+        'None of your saved emergency contacts can receive in-app SOS alerts yet. Ask them to join Sailor and save their username in your contact list.',
+      );
+    }
 
-      for (final contact in contacts) {
-        final username = (contact.username ?? '').trim();
-        final profile = profileByUsername[username];
-        final recipientUserId = (profile?['uid'] ?? '').toString().trim();
-        if (username.isEmpty ||
-            recipientUserId.isEmpty ||
-            recipientUserId == currentUserId) {
-          skippedCount++;
-          continue;
-        }
-
-        rows.add({
-          'session_id': sessionId,
-          'sender_user_id': currentUserId,
-          'sender_name': senderName,
-          'sender_username': senderProfile?.username,
-          'sender_phone_number': senderProfile?.phoneNumber,
-          'sender_photo_path': senderProfile?.profilePhotoPath,
-          'recipient_user_id': recipientUserId,
-          'recipient_username': username,
-          'contact_name': _sanitizeText(contact.name, _maxNameLength),
-          'contact_phone_number': _sanitizeText(contact.phoneNumber, 20),
-          'is_primary': contact.isPrimary,
-          'alert_message': sanitizedMessage,
-          'latitude': position.latitude,
-          'longitude': position.longitude,
-          'location_accuracy_meters': position.accuracy,
-        });
-        deliveredCount++;
-        if (contact.isPrimary) {
-          hasPrimaryRecipient = true;
-        }
-      }
-
-      if (rows.isEmpty) {
-        throw StateError(
-          'None of your saved emergency contacts can receive in-app SOS alerts yet. Ask them to join Aegixa and save their username in your contact list.',
-        );
-      }
-
+    // Try to deliver to Supabase.  If the network is unavailable, queue the
+    // rows locally so the SOS session still starts (recordings, location, UI)
+    // and rows get delivered once connectivity returns.
+    try {
       final insertedRows = await _supabase
           .from(_table)
           .insert(rows)
@@ -301,9 +330,26 @@ class SosAlertService {
         pushErrorMessage: pushSummary.errorMessage,
       );
     } on PostgrestException catch (error) {
+      // Table/permission errors are real failures — don't queue.
       throw StateError(_friendlySupabaseError(error));
-    } on StorageException catch (error) {
-      throw StateError(_friendlyStorageError(error));
+    } catch (networkError) {
+      // Network failure — queue rows locally for later delivery.
+      debugPrint(
+        'SOS trigger offline — queuing ${rows.length} alert rows for retry: $networkError',
+      );
+      await _enqueueOfflineTrigger(sessionId, rows);
+      _lastSosTriggeredAt = DateTime.now();
+
+      return SosAlertDispatchSummary(
+        sessionId: sessionId,
+        deliveredCount: deliveredCount,
+        skippedCount: skippedCount,
+        hasPrimaryRecipient: hasPrimaryRecipient,
+        pushDeliveredCount: 0,
+        pushSkippedCount: deliveredCount,
+        pushErrorMessage: 'Alerts queued offline — will deliver when internet returns.',
+        offlineQueued: true,
+      );
     }
   }
 
@@ -325,6 +371,10 @@ class SosAlertService {
           .eq('status', 'active');
     } on PostgrestException catch (error) {
       throw StateError(_friendlySupabaseError(error));
+    } catch (_) {
+      // Network unavailable — silently skip this location update.
+      // The next update cycle will retry with a fresher position.
+      debugPrint('SOS live location update skipped (offline)');
     }
   }
 
@@ -377,22 +427,52 @@ class SosAlertService {
     } on PostgrestException catch (error) {
       throw StateError(_friendlySupabaseError(error));
     } on StorageException catch (error) {
-      throw StateError(_friendlyStorageError(error));
+      // Storage upload failed (possibly offline) — queue resolve for retry.
+      debugPrint('SOS resolve storage upload failed (offline): $error');
+      await _enqueueOfflineResolve(
+        sessionId: sessionId,
+        voiceRecordingPath: voiceRecordingPath,
+        videoRecordingPath: videoRecordingPath,
+      );
+    } catch (networkError) {
+      // Network unavailable — queue resolve for retry when online.
+      debugPrint('SOS resolve offline — queued for retry: $networkError');
+      await _enqueueOfflineResolve(
+        sessionId: sessionId,
+        voiceRecordingPath: voiceRecordingPath,
+        videoRecordingPath: videoRecordingPath,
+      );
     }
   }
 
-  Stream<List<SosAlert>> watchReceivedAlerts() {
-    return _supabase
-        .from(_table)
-        .stream(primaryKey: ['id'])
-        .eq('recipient_user_id', _currentUserId)
-        .map(
-          (rows) => rows
-              .whereType<Map<String, dynamic>>()
-              .map(SosAlert.fromMap)
-              .toList()
-            ..sort((a, b) => b.triggeredAt.compareTo(a.triggeredAt)),
-        );
+  Stream<List<SosAlert>> watchReceivedAlerts() async* {
+    final userId = _currentUserId;
+    final cachedAlerts = await _loadReceivedAlertsCache(userId);
+    if (cachedAlerts.isNotEmpty) {
+      yield cachedAlerts;
+    }
+
+    try {
+      yield* _supabase
+          .from(_table)
+          .stream(primaryKey: ['id'])
+          .eq('recipient_user_id', userId)
+          .map(
+            (rows) => rows
+                .whereType<Map<String, dynamic>>()
+                .map(SosAlert.fromMap)
+                .toList()
+              ..sort((a, b) => b.triggeredAt.compareTo(a.triggeredAt)),
+          )
+          .asyncMap((alerts) async {
+            await _saveReceivedAlertsCache(userId, alerts);
+            return alerts;
+          });
+    } catch (e) {
+      // Offline or stream connection failed — the cached snapshot was already
+      // yielded above, so the UI still shows the last known data.
+      debugPrint('SOS inbox stream failed (offline): $e');
+    }
   }
 
   Future<String?> getDownloadedVoiceRecordingPath(int alertId) async {
@@ -508,7 +588,7 @@ class SosAlertService {
     }
   }
 
-  String _resolveSenderName(AegixaPublicProfile? profile) {
+  String _resolveSenderName(SailorPublicProfile? profile) {
     final user = FirebaseAuth.instance.currentUser;
     final profileName = (profile?.displayName ?? '').trim();
     if (profileName.isNotEmpty) {
@@ -522,7 +602,7 @@ class SosAlertService {
     if (email.isNotEmpty) {
       return email.split('@').first;
     }
-    return 'Aegixa User';
+    return 'Sailor User';
   }
 
   Future<String?> _uploadMediaRecording({
@@ -728,6 +808,51 @@ class SosAlertService {
     await prefs.setString(key, jsonEncode(paths));
   }
 
+  Future<List<SosAlert>> _loadReceivedAlertsCache(String userId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString('$_receivedAlertsCacheKeyPrefix$userId');
+    if ((raw ?? '').trim().isEmpty) {
+      return const <SosAlert>[];
+    }
+
+    try {
+      final decoded = jsonDecode(raw!) as Map<String, dynamic>;
+      final expiresAt = DateTime.tryParse(
+        (decoded['expires_at'] ?? '').toString(),
+      );
+      if (expiresAt == null || DateTime.now().isAfter(expiresAt)) {
+        return const <SosAlert>[];
+      }
+      final items = decoded['alerts'];
+      if (items is! List) {
+        return const <SosAlert>[];
+      }
+      return items
+          .whereType<Map<String, dynamic>>()
+          .map(SosAlert.fromMap)
+          .toList()
+        ..sort((a, b) => b.triggeredAt.compareTo(a.triggeredAt));
+    } catch (_) {
+      return const <SosAlert>[];
+    }
+  }
+
+  Future<void> _saveReceivedAlertsCache(
+    String userId,
+    List<SosAlert> alerts,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      '$_receivedAlertsCacheKeyPrefix$userId',
+      jsonEncode({
+        'expires_at': DateTime.now()
+            .add(_receivedAlertsCacheTtl)
+            .toIso8601String(),
+        'alerts': alerts.map((alert) => alert.toMap()).toList(),
+      }),
+    );
+  }
+
   String _friendlySupabaseError(PostgrestException error) {
     // Log the raw error for debugging but never expose it to the user.
     debugPrint('Supabase SOS error: ${error.code}');
@@ -750,13 +875,204 @@ class SosAlertService {
     return 'SOS request failed. Please try again.';
   }
 
-  String _friendlyStorageError(StorageException error) {
-    debugPrint('Supabase storage error: ${error.statusCode}');
-    final lower = error.message.trim().toLowerCase();
-    if (lower.contains('bucket')) {
-      return 'SOS recording storage is not configured. Please contact support.';
+  // ---------------------------------------------------------------------------
+  // Offline queue: trigger
+  // ---------------------------------------------------------------------------
+
+  Future<void> _enqueueOfflineTrigger(
+    String sessionId,
+    List<Map<String, Object?>> rows,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_offlineTriggerQueueKey);
+    final List<dynamic> queue =
+        (raw != null ? jsonDecode(raw) as List<dynamic> : <dynamic>[]);
+    queue.add({
+      'session_id': sessionId,
+      'rows': rows,
+      'queued_at': DateTime.now().toIso8601String(),
+    });
+    await prefs.setString(_offlineTriggerQueueKey, jsonEncode(queue));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Offline queue: resolve
+  // ---------------------------------------------------------------------------
+
+  Future<void> _enqueueOfflineResolve({
+    required String sessionId,
+    String? voiceRecordingPath,
+    String? videoRecordingPath,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_offlineResolveQueueKey);
+    final List<dynamic> queue =
+        (raw != null ? jsonDecode(raw) as List<dynamic> : <dynamic>[]);
+    queue.add({
+      'session_id': sessionId,
+      'voice_recording_path': voiceRecordingPath,
+      'video_recording_path': videoRecordingPath,
+      'queued_at': DateTime.now().toIso8601String(),
+    });
+    await prefs.setString(_offlineResolveQueueKey, jsonEncode(queue));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Public offline retry API
+  // ---------------------------------------------------------------------------
+
+  /// Returns `true` if there are queued trigger or resolve operations waiting
+  /// for connectivity.
+  Future<bool> hasOfflineOperations() async {
+    final prefs = await SharedPreferences.getInstance();
+    final triggerRaw = prefs.getString(_offlineTriggerQueueKey);
+    final resolveRaw = prefs.getString(_offlineResolveQueueKey);
+    final hasTriggers = triggerRaw != null &&
+        triggerRaw.isNotEmpty &&
+        (jsonDecode(triggerRaw) as List).isNotEmpty;
+    final hasResolves = resolveRaw != null &&
+        resolveRaw.isNotEmpty &&
+        (jsonDecode(resolveRaw) as List).isNotEmpty;
+    return hasTriggers || hasResolves;
+  }
+
+  /// Attempts to deliver all queued offline trigger and resolve operations.
+  /// Silently removes successfully delivered items.  Items that still fail
+  /// (e.g. still offline) remain in the queue for the next retry cycle.
+  Future<void> retryOfflineOperations() async {
+    await _retryOfflineTriggers();
+    await _retryOfflineResolves();
+  }
+
+  Future<void> _retryOfflineTriggers() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_offlineTriggerQueueKey);
+    if (raw == null || raw.isEmpty) return;
+
+    final List<dynamic> queue;
+    try {
+      queue = jsonDecode(raw) as List<dynamic>;
+    } catch (_) {
+      await prefs.remove(_offlineTriggerQueueKey);
+      return;
     }
-    // Never forward raw storage error messages to the user.
-    return 'Could not upload the SOS recording. Please try again.';
+    if (queue.isEmpty) return;
+
+    final remaining = <dynamic>[];
+    for (final entry in queue) {
+      if (entry is! Map<String, dynamic>) continue;
+      final rows = entry['rows'];
+      if (rows is! List || rows.isEmpty) continue;
+
+      try {
+        final typedRows = rows
+            .whereType<Map<String, dynamic>>()
+            .map((r) => Map<String, Object?>.from(r))
+            .toList();
+        final insertedRows = await _supabase
+            .from(_table)
+            .insert(typedRows)
+            .select('id,session_id,recipient_user_id,sender_name,alert_message');
+        // Best-effort push after delayed insert
+        await _dispatchPushAlerts(insertedRows);
+        debugPrint(
+          'Offline SOS trigger delivered: session ${entry['session_id']}',
+        );
+      } on PostgrestException catch (e) {
+        // Real DB error (table missing, RLS) — drop this entry to avoid
+        // infinite retries of a permanently failing operation.
+        debugPrint('Offline SOS trigger permanently failed: ${e.message}');
+      } catch (_) {
+        // Still offline — keep for next retry
+        remaining.add(entry);
+      }
+    }
+
+    if (remaining.isEmpty) {
+      await prefs.remove(_offlineTriggerQueueKey);
+    } else {
+      await prefs.setString(_offlineTriggerQueueKey, jsonEncode(remaining));
+    }
+  }
+
+  Future<void> _retryOfflineResolves() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_offlineResolveQueueKey);
+    if (raw == null || raw.isEmpty) return;
+
+    final List<dynamic> queue;
+    try {
+      queue = jsonDecode(raw) as List<dynamic>;
+    } catch (_) {
+      await prefs.remove(_offlineResolveQueueKey);
+      return;
+    }
+    if (queue.isEmpty) return;
+
+    final remaining = <dynamic>[];
+    for (final entry in queue) {
+      if (entry is! Map<String, dynamic>) continue;
+      final sessionId = (entry['session_id'] ?? '').toString();
+      if (sessionId.isEmpty) continue;
+
+      final voicePath = entry['voice_recording_path'] as String?;
+      final videoPath = entry['video_recording_path'] as String?;
+
+      try {
+        String? uploadedVoiceUrl;
+        String? uploadedVideoUrl;
+        if ((voicePath ?? '').trim().isNotEmpty) {
+          uploadedVoiceUrl = await _uploadMediaRecording(
+            sessionId: sessionId,
+            localFilePath: voicePath!.trim(),
+            fileStem: 'voice_recording',
+          );
+        }
+        if ((videoPath ?? '').trim().isNotEmpty) {
+          uploadedVideoUrl = await _uploadMediaRecording(
+            sessionId: sessionId,
+            localFilePath: videoPath!.trim(),
+            fileStem: 'video_recording',
+          );
+        }
+
+        if (uploadedVoiceUrl != null || uploadedVideoUrl != null) {
+          await _supabase
+              .from(_table)
+              .update({
+                if (uploadedVoiceUrl != null)
+                  'voice_recording_url': uploadedVoiceUrl,
+                if (uploadedVideoUrl != null)
+                  'video_recording_url': uploadedVideoUrl,
+                'updated_at': DateTime.now().toIso8601String(),
+              })
+              .eq('session_id', sessionId)
+              .eq('sender_user_id', _currentUserId);
+        }
+
+        await _supabase
+            .from(_table)
+            .update({
+              'status': 'resolved',
+              'resolved_at': DateTime.now().toIso8601String(),
+              'updated_at': DateTime.now().toIso8601String(),
+            })
+            .eq('session_id', sessionId)
+            .eq('sender_user_id', _currentUserId);
+
+        debugPrint('Offline SOS resolve delivered: session $sessionId');
+      } on PostgrestException catch (e) {
+        debugPrint('Offline SOS resolve permanently failed: ${e.message}');
+      } catch (_) {
+        // Still offline — keep for next retry
+        remaining.add(entry);
+      }
+    }
+
+    if (remaining.isEmpty) {
+      await prefs.remove(_offlineResolveQueueKey);
+    } else {
+      await prefs.setString(_offlineResolveQueueKey, jsonEncode(remaining));
+    }
   }
 }

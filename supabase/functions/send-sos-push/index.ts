@@ -12,7 +12,7 @@ type VerifiedSosAlert = SosAlertPushPayload & {
 }
 
 const ALLOWED_ORIGINS = [
-  'https://ilwxanuvttrhxkgmaphq.supabase.co',
+  Deno.env.get('SUPABASE_URL') ?? '',
 ]
 
 function getCorsHeaders(request: Request) {
@@ -140,7 +140,7 @@ Deno.serve(async (request) => {
                 token,
                 notification: {
                   title: 'PANIC ALERT',
-                  body: `${alert.senderName} sent an emergency SOS. Open Aegixa now.`,
+                  body: `${alert.senderName} sent an emergency SOS. Open Sailor now.`,
                 },
                 data: {
                   type: 'sos_alert',
@@ -246,7 +246,7 @@ async function verifyAlertsForCaller(
       alertId,
       sessionId,
       recipientUserId,
-      senderName: String(row.sender_name ?? '').trim() || 'Aegixa User',
+      senderName: String(row.sender_name ?? '').trim() || 'Sailor User',
       alertMessage: String(row.alert_message ?? '').trim(),
     })
   }

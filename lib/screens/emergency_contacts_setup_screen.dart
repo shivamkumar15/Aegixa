@@ -29,12 +29,24 @@ class _EmergencyContactsSetupScreenState
   }
 
   Future<void> _loadContacts() async {
-    final contacts = await _service.getContacts();
-    if (!mounted) return;
-    setState(() {
-      _contacts = contacts;
-      _isLoading = false;
-    });
+    try {
+      final contacts = await _service.getContacts();
+      if (!mounted) return;
+      setState(() {
+        _contacts = contacts;
+        _isLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'Could not load contacts. Please check your internet connection.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   Future<void> _openContactSheet({EmergencyContact? contact}) async {
@@ -52,11 +64,22 @@ class _EmergencyContactsSetupScreenState
 
   Future<void> _setLater() async {
     setState(() => _isSaving = true);
-    await _service.markOnboardingSkipped(true);
-    if (!mounted) return;
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const HomeScreen()),
-    );
+    try {
+      await _service.markOnboardingSkipped(true);
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const HomeScreen()),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _isSaving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not save. Please check your connection.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   Future<void> _continue() async {
@@ -68,11 +91,22 @@ class _EmergencyContactsSetupScreenState
       return;
     }
     setState(() => _isSaving = true);
-    await _service.markOnboardingSkipped(false);
-    if (!mounted) return;
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const HomeScreen(initialIndex: 2)),
-    );
+    try {
+      await _service.markOnboardingSkipped(false);
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const HomeScreen(initialIndex: 2)),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _isSaving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not save. Please check your connection.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   Future<void> _callContact(String phoneNumber) async {
@@ -94,7 +128,7 @@ class _EmergencyContactsSetupScreenState
       appBar: AppBar(title: const Text('Emergency Contacts')),
       body: _isLoading
           ? const Center(
-              child: AegixaLoader(),
+              child: SailorLoader(),
             )
           : SafeArea(
               child: ListView(
@@ -142,8 +176,20 @@ class _EmergencyContactsSetupScreenState
                           onCall: () => _callContact(contact.phoneNumber),
                           onEdit: () => _openContactSheet(contact: contact),
                           onDelete: () async {
-                            await _service.deleteContact(contact.id!);
-                            await _loadContacts();
+                            final messenger =
+                                ScaffoldMessenger.of(context);
+                            try {
+                              await _service.deleteContact(contact.id!);
+                              await _loadContacts();
+                            } catch (_) {
+                              messenger.showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                      'Could not delete contact. Please check your connection.'),
+                                  backgroundColor: Colors.red,
+                                ),
+                              );
+                            }
                           },
                         ),
                       ),

@@ -1,11 +1,13 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide User;
 
-class AegixaUserSuggestion {
-  const AegixaUserSuggestion({
+class SailorUserSuggestion {
+  const SailorUserSuggestion({
     required this.uid,
     required this.username,
     this.displayName,
@@ -20,8 +22,8 @@ class AegixaUserSuggestion {
   final String? profilePhotoPath;
 }
 
-class AegixaPublicProfile {
-  const AegixaPublicProfile({
+class SailorPublicProfile {
+  const SailorPublicProfile({
     required this.uid,
     this.username,
     this.displayName,
@@ -36,6 +38,37 @@ class AegixaPublicProfile {
   final String? phoneNumber;
   final String? profilePhotoPath;
   final String? dateOfBirth;
+
+  Map<String, Object?> toMap() {
+    return {
+      'uid': uid,
+      'username': username,
+      'display_name': displayName,
+      'phone_number': phoneNumber,
+      'photo_path': profilePhotoPath,
+      'date_of_birth': dateOfBirth,
+    };
+  }
+
+  factory SailorPublicProfile.fromMap(Map<String, dynamic> map) {
+    return SailorPublicProfile(
+      uid: (map['uid'] ?? '').toString(),
+      username: map['username'] as String?,
+      displayName: map['display_name'] as String?,
+      phoneNumber: map['phone_number'] as String?,
+      profilePhotoPath: map['photo_path'] as String?,
+      dateOfBirth: map['date_of_birth'] as String?,
+    );
+  }
+}
+
+class _MemoryCacheEntry<T> {
+  const _MemoryCacheEntry(this.value, this.expiresAt);
+
+  final T value;
+  final DateTime expiresAt;
+
+  bool get isFresh => DateTime.now().isBefore(expiresAt);
 }
 
 class UsernameService {
@@ -45,6 +78,23 @@ class UsernameService {
 
   final SupabaseClient _supabase = Supabase.instance.client;
   static const _table = 'usernames';
+  static const Duration _usernameCacheTtl = Duration(minutes: 10);
+  static const Duration _profileCacheTtl = Duration(minutes: 10);
+  static const Duration _searchCacheTtl = Duration(seconds: 30);
+  static const Duration _availabilityCacheTtl = Duration(seconds: 10);
+  static const _usernameCacheKeyPrefix = 'username_cache_v1_';
+  static const _profileUidCacheKeyPrefix = 'public_profile_uid_cache_v1_';
+  static const _profileUsernameCacheKeyPrefix =
+      'public_profile_username_cache_v1_';
+
+  final Map<String, _MemoryCacheEntry<String?>> _usernameCache = {};
+  final Map<String, _MemoryCacheEntry<SailorPublicProfile?>> _profileUidCache =
+      {};
+  final Map<String, _MemoryCacheEntry<SailorPublicProfile?>>
+      _profileUsernameCache = {};
+  final Map<String, _MemoryCacheEntry<List<SailorUserSuggestion>>>
+      _searchCache = {};
+  final Map<String, _MemoryCacheEntry<String?>> _availabilityCache = {};
 
   String normalizeForInput(String value) {
     final lowered = value.toLowerCase().trim();
@@ -56,34 +106,44 @@ class UsernameService {
   }
 
   Future<String?> getUsernameForUserId(String userId) async {
-    final data = await _supabase
-        .from(_table)
-        .select('username')
-        .eq('uid', userId)
-        .maybeSingle();
-    if (data == null) {
-      return null;
+    final cached = _usernameCache[userId];
+    if (cached != null && cached.isFresh) {
+      return cached.value;
     }
-    final username = data['username'];
-    if (username is String && username.trim().isNotEmpty) {
-      return username.trim();
-    }
-    return null;
-  }
 
-  Stream<String?> usernameStreamForUserId(String userId) {
-    return _supabase
-        .from(_table)
-        .stream(primaryKey: ['uid'])
-        .eq('uid', userId)
-        .map((rows) {
-          final data = rows.isEmpty ? null : rows.first;
-          final username = data?['username'];
-          if (username is String && username.trim().isNotEmpty) {
-            return username.trim();
-          }
-          return null;
-        });
+    final persisted = await _loadPersistedValue<String?>(
+      '$_usernameCacheKeyPrefix$userId',
+      (map) {
+        final username = map['username'];
+        if (username is String && username.trim().isNotEmpty) {
+          return username.trim();
+        }
+        return null;
+      },
+    );
+    if (persisted.hit) {
+      _usernameCache[userId] = _MemoryCacheEntry(
+        persisted.value,
+        persisted.expiresAt!,
+      );
+      return persisted.value;
+    }
+
+    try {
+      final data = await _supabase
+          .from(_table)
+          .select('username')
+          .eq('uid', userId)
+          .maybeSingle();
+      final username = _extractUsername(data);
+      await _cacheUsername(userId, username);
+      return username;
+    } catch (_) {
+      if (cached != null) {
+        return cached.value;
+      }
+      return persisted.value;
+    }
   }
 
   bool isValidUsernameFormat(String username) {
@@ -99,17 +159,79 @@ class UsernameService {
       return false;
     }
 
+    // Check short-lived availability cache first.
+    final cached = _availabilityCache[username];
+    if (cached != null && cached.isFresh) {
+      final cachedOwnerId = cached.value;
+      if (cachedOwnerId == null) {
+        return true; // No owner — available.
+      }
+      return cachedOwnerId == currentUserId;
+    }
+
     final usernameRow = await _supabase
         .from(_table)
         .select('uid')
         .eq('username', username)
         .maybeSingle();
+
+    final ownerId =
+        usernameRow == null ? null : (usernameRow['uid'] ?? '').toString();
+    _availabilityCache[username] = _MemoryCacheEntry(
+      ownerId,
+      DateTime.now().add(_availabilityCacheTtl),
+    );
+
     if (usernameRow == null) {
       return true;
     }
-
-    final ownerId = usernameRow['uid'];
     return ownerId == currentUserId;
+  }
+
+  /// Batch-check availability for multiple usernames in a single query.
+  Future<Map<String, String?>> _batchCheckAvailability(
+    List<String> usernames,
+  ) async {
+    if (usernames.isEmpty) {
+      return const <String, String?>{};
+    }
+
+    final result = <String, String?>{};
+    final toFetch = <String>[];
+
+    for (final username in usernames) {
+      final cached = _availabilityCache[username];
+      if (cached != null && cached.isFresh) {
+        result[username] = cached.value;
+      } else {
+        toFetch.add(username);
+      }
+    }
+
+    if (toFetch.isNotEmpty) {
+      final rows = await _supabase
+          .from(_table)
+          .select('uid,username')
+          .inFilter('username', toFetch);
+
+      final fetched = <String, String>{};
+      for (final row in rows) {
+        final u = (row['username'] ?? '').toString().trim();
+        final uid = (row['uid'] ?? '').toString().trim();
+        if (u.isNotEmpty && uid.isNotEmpty) {
+          fetched[u] = uid;
+        }
+      }
+
+      final expiry = DateTime.now().add(_availabilityCacheTtl);
+      for (final username in toFetch) {
+        final ownerId = fetched[username];
+        result[username] = ownerId;
+        _availabilityCache[username] = _MemoryCacheEntry(ownerId, expiry);
+      }
+    }
+
+    return result;
   }
 
   Future<String> claimUsername({
@@ -125,13 +247,22 @@ class UsernameService {
       );
     }
 
-    final existingForUser = await _supabase
-        .from(_table)
-        .select('username')
-        .eq('uid', user.uid)
-        .maybeSingle();
-    final existingUsername = existingForUser?['username'];
-    if (existingUsername is String && existingUsername.trim().isNotEmpty) {
+    // Try the in-memory username cache first before hitting DB.
+    final cachedUsername = _usernameCache[user.uid];
+    String? existingUsername;
+    if (cachedUsername != null && cachedUsername.isFresh) {
+      existingUsername = cachedUsername.value;
+    } else {
+      final existingForUser = await _supabase
+          .from(_table)
+          .select('username')
+          .eq('uid', user.uid)
+          .maybeSingle();
+      existingUsername = _extractUsername(existingForUser);
+      await _cacheUsername(user.uid, existingUsername);
+    }
+
+    if (existingUsername != null && existingUsername.trim().isNotEmpty) {
       if (existingUsername == username) {
         return username;
       }
@@ -146,6 +277,7 @@ class UsernameService {
         'uid': user.uid,
         'username': username,
       });
+      await _cacheUsername(user.uid, username);
     } on PostgrestException catch (e) {
       if (_isUniqueViolation(e)) {
         throw FirebaseAuthException(
@@ -169,10 +301,11 @@ class UsernameService {
     int max = 5,
   }) async {
     final base = _normalizeBase(preferredName);
-    final suggestions = <String>[];
-    final seen = <String>{};
 
-    for (var attempt = 0; suggestions.length < max && attempt < 80; attempt++) {
+    // Build all valid candidates up front.
+    final candidates = <String>[];
+    final seen = <String>{};
+    for (var attempt = 0; candidates.length < 80 && attempt < 80; attempt++) {
       final candidate = attempt == 0 ? base : '$base${attempt + 1}';
       if (!seen.add(candidate)) {
         continue;
@@ -180,11 +313,23 @@ class UsernameService {
       if (!isValidUsernameFormat(candidate)) {
         continue;
       }
-      final available = await isUsernameAvailable(
-        candidate,
-        currentUserId: currentUserId,
-      );
-      if (available) {
+      candidates.add(candidate);
+    }
+
+    if (candidates.isEmpty) {
+      return const <String>[];
+    }
+
+    // Single batch query instead of up to 80 serial DB calls.
+    final ownersByUsername = await _batchCheckAvailability(candidates);
+
+    final suggestions = <String>[];
+    for (final candidate in candidates) {
+      if (suggestions.length >= max) {
+        break;
+      }
+      final ownerId = ownersByUsername[candidate];
+      if (ownerId == null || ownerId == currentUserId) {
         suggestions.add(candidate);
       }
     }
@@ -217,13 +362,19 @@ class UsernameService {
     );
   }
 
-  Future<List<AegixaUserSuggestion>> searchUsers(
+  Future<List<SailorUserSuggestion>> searchUsers(
     String rawQuery, {
     int limit = 8,
   }) async {
     final query = normalizeForInput(rawQuery);
     if (query.length < 2) {
-      return const <AegixaUserSuggestion>[];
+      return const <SailorUserSuggestion>[];
+    }
+
+    final cacheKey = '$query:$limit';
+    final cached = _searchCache[cacheKey];
+    if (cached != null && cached.isFresh) {
+      return cached.value;
     }
 
     // Escape ILIKE wildcards so user input cannot widen the search pattern.
@@ -241,7 +392,7 @@ class UsernameService {
     final suggestions = rows
         .whereType<Map<String, dynamic>>()
         .map(
-          (row) => AegixaUserSuggestion(
+          (row) => SailorUserSuggestion(
             uid: (row['uid'] ?? '').toString(),
             username: (row['username'] ?? '').toString(),
           ),
@@ -267,9 +418,9 @@ class UsernameService {
         }
       }
 
-      return suggestions.map((item) {
+      final hydrated = suggestions.map((item) {
         final profile = profileMap[item.uid];
-        return AegixaUserSuggestion(
+        return SailorUserSuggestion(
           uid: item.uid,
           username: item.username,
           displayName:
@@ -280,9 +431,103 @@ class UsernameService {
               profile == null ? null : profile['photo_path'] as String?,
         );
       }).toList();
+      _searchCache[cacheKey] = _MemoryCacheEntry(
+        hydrated,
+        DateTime.now().add(_searchCacheTtl),
+      );
+      return hydrated;
     } catch (_) {
+      _searchCache[cacheKey] = _MemoryCacheEntry(
+        suggestions,
+        DateTime.now().add(_searchCacheTtl),
+      );
       return suggestions;
     }
+  }
+
+  Future<Map<String, SailorPublicProfile>> getPublicProfilesForUsernames(
+    Iterable<String> usernames,
+  ) async {
+    final normalizedUsernames = usernames
+        .map((username) => username.trim())
+        .where((username) => username.isNotEmpty)
+        .toSet()
+        .toList();
+    if (normalizedUsernames.isEmpty) {
+      return const <String, SailorPublicProfile>{};
+    }
+
+    final profilesByUsername = <String, SailorPublicProfile>{};
+    final missingUsernames = <String>[];
+
+    for (final username in normalizedUsernames) {
+      final cached = _profileUsernameCache[username];
+      if (cached != null && cached.isFresh && cached.value != null) {
+        profilesByUsername[username] = cached.value!;
+        continue;
+      }
+
+      final persisted = await _loadPersistedValue<SailorPublicProfile?>(
+        '$_profileUsernameCacheKeyPrefix$username',
+        (map) => SailorPublicProfile.fromMap(map),
+      );
+      if (persisted.hit && persisted.value != null) {
+        final profile = persisted.value!;
+        _profileUsernameCache[username] = _MemoryCacheEntry(
+          profile,
+          persisted.expiresAt!,
+        );
+        if (profile.uid.isNotEmpty) {
+          _profileUidCache[profile.uid] = _MemoryCacheEntry(
+            profile,
+            persisted.expiresAt!,
+          );
+        }
+        profilesByUsername[username] = profile;
+        continue;
+      }
+
+      missingUsernames.add(username);
+    }
+
+    if (missingUsernames.isEmpty) {
+      return profilesByUsername;
+    }
+
+    try {
+      final rows = await _supabase
+          .from('public_profiles')
+          .select(
+              'uid,username,display_name,phone_number,photo_path,date_of_birth')
+          .inFilter('username', missingUsernames);
+
+      final fetchedUsernames = <String>{};
+      for (final row in rows.whereType<Map<String, dynamic>>()) {
+        final profile = SailorPublicProfile.fromMap(row);
+        final username = (profile.username ?? '').trim();
+        if (username.isEmpty) {
+          continue;
+        }
+        fetchedUsernames.add(username);
+        profilesByUsername[username] = profile;
+        await _cachePublicProfile(profile);
+      }
+
+      for (final username in missingUsernames) {
+        if (!fetchedUsernames.contains(username)) {
+          await _cachePublicProfile(null, username: username);
+        }
+      }
+    } catch (_) {
+      for (final username in missingUsernames) {
+        final fallback = _profileUsernameCache[username];
+        if (fallback?.value != null) {
+          profilesByUsername[username] = fallback!.value!;
+        }
+      }
+    }
+
+    return profilesByUsername;
   }
 
   Future<void> upsertPublicProfile({
@@ -356,9 +601,44 @@ class UsernameService {
         'Could not save profile details. Check Supabase public_profiles setup.',
       );
     }
+
+    await _cachePublicProfile(
+      SailorPublicProfile(
+        uid: user.uid,
+        username: username,
+        displayName: (displayName ?? '').trim(),
+        phoneNumber: effectivePhone,
+        profilePhotoPath: effectivePhotoPath,
+        dateOfBirth: effectiveDob.isEmpty ? null : effectiveDob,
+      ),
+    );
   }
 
-  Future<AegixaPublicProfile?> getPublicProfileForUserId(String uid) async {
+  Future<SailorPublicProfile?> getPublicProfileForUserId(String uid) async {
+    final cached = _profileUidCache[uid];
+    if (cached != null && cached.isFresh) {
+      return cached.value;
+    }
+
+    final persisted = await _loadPersistedValue<SailorPublicProfile?>(
+      '$_profileUidCacheKeyPrefix$uid',
+      (map) => SailorPublicProfile.fromMap(map),
+    );
+    if (persisted.hit) {
+      _profileUidCache[uid] = _MemoryCacheEntry(
+        persisted.value,
+        persisted.expiresAt!,
+      );
+      final profile = persisted.value;
+      if (profile != null && (profile.username ?? '').trim().isNotEmpty) {
+        _profileUsernameCache[profile.username!.trim()] = _MemoryCacheEntry(
+          profile,
+          persisted.expiresAt!,
+        );
+      }
+      return profile;
+    }
+
     try {
       final row = await _supabase
           .from('public_profiles')
@@ -367,16 +647,12 @@ class UsernameService {
           .eq('uid', uid)
           .maybeSingle();
       if (row == null) {
+        await _cachePublicProfile(null, uid: uid);
         return null;
       }
-      return AegixaPublicProfile(
-        uid: (row['uid'] ?? '').toString(),
-        username: row['username'] as String?,
-        displayName: row['display_name'] as String?,
-        phoneNumber: row['phone_number'] as String?,
-        profilePhotoPath: row['photo_path'] as String?,
-        dateOfBirth: row['date_of_birth'] as String?,
-      );
+      final profile = SailorPublicProfile.fromMap(row);
+      await _cachePublicProfile(profile);
+      return profile;
     } catch (_) {
       try {
         final row = await _supabase
@@ -385,45 +661,73 @@ class UsernameService {
             .eq('uid', uid)
             .maybeSingle();
         if (row == null) {
+          await _cachePublicProfile(null, uid: uid);
           return null;
         }
-        return AegixaPublicProfile(
-          uid: (row['uid'] ?? '').toString(),
-          username: row['username'] as String?,
-          displayName: row['display_name'] as String?,
-          phoneNumber: row['phone_number'] as String?,
-          profilePhotoPath: row['photo_path'] as String?,
-        );
+        final profile = SailorPublicProfile.fromMap(row);
+        await _cachePublicProfile(profile);
+        return profile;
       } catch (_) {
-        return null;
+        if (cached != null) {
+          return cached.value;
+        }
+        return persisted.value;
       }
     }
   }
 
   /// Look up a public profile by username (not uid).
   /// Returns the full profile including photo_path.
-  Future<AegixaPublicProfile?> getPublicProfileForUsername(
+  Future<SailorPublicProfile?> getPublicProfileForUsername(
       String username) async {
+    final normalizedUsername = username.trim();
+    if (normalizedUsername.isEmpty) {
+      return null;
+    }
+
+    final cached = _profileUsernameCache[normalizedUsername];
+    if (cached != null && cached.isFresh) {
+      return cached.value;
+    }
+
+    final persisted = await _loadPersistedValue<SailorPublicProfile?>(
+      '$_profileUsernameCacheKeyPrefix$normalizedUsername',
+      (map) => SailorPublicProfile.fromMap(map),
+    );
+    if (persisted.hit) {
+      _profileUsernameCache[normalizedUsername] = _MemoryCacheEntry(
+        persisted.value,
+        persisted.expiresAt!,
+      );
+      final profile = persisted.value;
+      if (profile != null && profile.uid.isNotEmpty) {
+        _profileUidCache[profile.uid] = _MemoryCacheEntry(
+          profile,
+          persisted.expiresAt!,
+        );
+      }
+      return profile;
+    }
+
     try {
       final row = await _supabase
           .from('public_profiles')
           .select(
               'uid,username,display_name,phone_number,photo_path,date_of_birth')
-          .eq('username', username)
+          .eq('username', normalizedUsername)
           .maybeSingle();
       if (row == null) {
+        await _cachePublicProfile(null, username: normalizedUsername);
         return null;
       }
-      return AegixaPublicProfile(
-        uid: (row['uid'] ?? '').toString(),
-        username: row['username'] as String?,
-        displayName: row['display_name'] as String?,
-        phoneNumber: row['phone_number'] as String?,
-        profilePhotoPath: row['photo_path'] as String?,
-        dateOfBirth: row['date_of_birth'] as String?,
-      );
+      final profile = SailorPublicProfile.fromMap(row);
+      await _cachePublicProfile(profile);
+      return profile;
     } catch (_) {
-      return null;
+      if (cached != null) {
+        return cached.value;
+      }
+      return persisted.value;
     }
   }
 
@@ -493,7 +797,7 @@ class UsernameService {
     final lowered = preferredName.toLowerCase().trim().replaceAll(' ', '_');
     final cleaned = normalizeForInput(lowered);
     if (cleaned.isEmpty) {
-      return 'aegixa_user';
+      return 'sailor_user';
     }
     return cleaned.length > 24 ? cleaned.substring(0, 24) : cleaned;
   }
@@ -521,4 +825,124 @@ class UsernameService {
     }
     return 'Could not save profile details to Supabase.';
   }
+
+  String? _extractUsername(Map<String, dynamic>? data) {
+    final username = data?['username'];
+    if (username is String && username.trim().isNotEmpty) {
+      return username.trim();
+    }
+    return null;
+  }
+
+  Future<void> _cacheUsername(String userId, String? username) async {
+    final expiresAt = DateTime.now().add(_usernameCacheTtl);
+    _usernameCache[userId] = _MemoryCacheEntry(username, expiresAt);
+    await _savePersistedValue(
+      '$_usernameCacheKeyPrefix$userId',
+      expiresAt,
+      {'username': username},
+    );
+  }
+
+  Future<void> _cachePublicProfile(
+    SailorPublicProfile? profile, {
+    String? uid,
+    String? username,
+  }) async {
+    final resolvedUid = profile?.uid ?? uid;
+    final resolvedUsername = (profile?.username ?? username ?? '').trim();
+    final expiresAt = DateTime.now().add(_profileCacheTtl);
+
+    if (resolvedUid != null && resolvedUid.isNotEmpty) {
+      _profileUidCache[resolvedUid] = _MemoryCacheEntry(profile, expiresAt);
+      await _savePersistedValue(
+        '$_profileUidCacheKeyPrefix$resolvedUid',
+        expiresAt,
+        profile?.toMap(),
+      );
+    }
+
+    if (resolvedUsername.isNotEmpty) {
+      _profileUsernameCache[resolvedUsername] = _MemoryCacheEntry(
+        profile,
+        expiresAt,
+      );
+      await _savePersistedValue(
+        '$_profileUsernameCacheKeyPrefix$resolvedUsername',
+        expiresAt,
+        profile?.toMap(),
+      );
+    }
+  }
+
+  Future<void> _savePersistedValue(
+    String key,
+    DateTime expiresAt,
+    Map<String, Object?>? data,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      key,
+      jsonEncode({
+        'expires_at': expiresAt.toIso8601String(),
+        'data': data,
+      }),
+    );
+  }
+
+  Future<_PersistedCacheResult<T>> _loadPersistedValue<T>(
+    String key,
+    T Function(Map<String, dynamic> map) parser,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(key);
+    if (raw == null || raw.trim().isEmpty) {
+      return const _PersistedCacheResult.miss();
+    }
+
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map<String, dynamic>) {
+        return const _PersistedCacheResult.miss();
+      }
+      final expiresRaw = decoded['expires_at'];
+      final expiresAt = expiresRaw is String
+          ? DateTime.tryParse(expiresRaw)
+          : null;
+      final data = decoded['data'];
+      if (expiresAt == null) {
+        return const _PersistedCacheResult.miss();
+      }
+      if (data == null) {
+        return _PersistedCacheResult.hit(null, expiresAt);
+      }
+      if (data is! Map<String, dynamic>) {
+        return const _PersistedCacheResult.miss();
+      }
+      if (DateTime.now().isAfter(expiresAt)) {
+        return _PersistedCacheResult.stale(parser(data));
+      }
+      return _PersistedCacheResult.hit(parser(data), expiresAt);
+    } catch (_) {
+      return const _PersistedCacheResult.miss();
+    }
+  }
+}
+
+class _PersistedCacheResult<T> {
+  const _PersistedCacheResult.hit(this.value, this.expiresAt)
+      : hit = true;
+
+  const _PersistedCacheResult.stale(this.value)
+      : hit = false,
+        expiresAt = null;
+
+  const _PersistedCacheResult.miss()
+      : hit = false,
+        value = null,
+        expiresAt = null;
+
+  final bool hit;
+  final T? value;
+  final DateTime? expiresAt;
 }

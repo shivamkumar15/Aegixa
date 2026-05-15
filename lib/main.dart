@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -18,11 +19,11 @@ void main() async {
   try {
     const supabaseUrl = String.fromEnvironment(
       'SUPABASE_URL',
-      defaultValue: 'https://ilwxanuvttrhxkgmaphq.supabase.co',
+      defaultValue: '',
     );
     const supabaseAnonKey = String.fromEnvironment(
       'SUPABASE_ANON_KEY',
-      defaultValue: 'sb_publishable_NL5o0d8iVuxi3yUXcZJ6rQ_mOvr9JqQ',
+      defaultValue: '',
     );
 
     await Supabase.initialize(
@@ -56,7 +57,7 @@ void main() async {
     SupabaseAuthBridge().initialize();
   }
 
-  runApp(const AegixaApp());
+  runApp(const SailorApp());
 }
 
 @pragma('vm:entry-point')
@@ -76,17 +77,20 @@ void overlayMain() {
   runApp(const PanicOverlayApp());
 }
 
-class AegixaApp extends StatefulWidget {
-  const AegixaApp({super.key});
+class SailorApp extends StatefulWidget {
+  const SailorApp({super.key});
 
   @override
-  State<AegixaApp> createState() => _AegixaAppState();
+  State<SailorApp> createState() => _SailorAppState();
 }
 
-class _AegixaAppState extends State<AegixaApp> {
+class _SailorAppState extends State<SailorApp> {
   static const _themeModePrefsKey = 'theme_mode';
+  static const MethodChannel _hardwareSosChannel =
+      MethodChannel('sailor/hardware_sos');
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   bool _permissionsReady = false;
+  bool _launchedForHardwareSos = false;
   final ValueNotifier<ThemeMode> _themeMode =
       ValueNotifier<ThemeMode>(ThemeMode.system);
 
@@ -107,6 +111,16 @@ class _AegixaAppState extends State<AegixaApp> {
         prefs.getBool(AppPermissionsScreen.permissionsPrefsKey) ?? false;
     final savedMode =
         savedValue == null ? null : _themeModeFromString(savedValue);
+    bool launchedForHardwareSos = false;
+
+    try {
+      launchedForHardwareSos = await _hardwareSosChannel.invokeMethod<bool>(
+            'hasPendingShortcutTrigger',
+          ) ??
+          false;
+    } catch (_) {
+      launchedForHardwareSos = false;
+    }
 
     if (!mounted) {
       return;
@@ -117,6 +131,7 @@ class _AegixaAppState extends State<AegixaApp> {
     }
     setState(() {
       _permissionsReady = permissionsReady;
+      _launchedForHardwareSos = launchedForHardwareSos;
     });
   }
 
@@ -227,13 +242,13 @@ class _AegixaAppState extends State<AegixaApp> {
         valueListenable: _themeMode,
         builder: (context, mode, _) {
           return MaterialApp(
-            title: 'Aegixa',
+            title: 'Sailor',
             debugShowCheckedModeBanner: false,
             navigatorKey: _navigatorKey,
             themeMode: mode,
             theme: _buildLightTheme(),
             darkTheme: _buildDarkTheme(),
-            home: _permissionsReady
+            home: (_permissionsReady || _launchedForHardwareSos)
                 ? const AuthGate()
                 : AppPermissionsScreen(
                     onCompleted: () {

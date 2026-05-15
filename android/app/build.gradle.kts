@@ -8,7 +8,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.aegixa"
+    namespace = "com.example.sailor"
     compileSdk = 36
     buildToolsVersion = "34.0.0"
     ndkVersion = "28.2.13676358"
@@ -22,7 +22,7 @@ android {
     
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.example.aegixa"
+        applicationId = "com.example.sailor"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = 24

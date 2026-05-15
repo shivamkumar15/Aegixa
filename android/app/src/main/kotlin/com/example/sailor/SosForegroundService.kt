@@ -1,4 +1,4 @@
-package com.example.aegixa
+package com.example.sailor
 
 import android.app.AlarmManager
 import android.app.Notification
@@ -39,16 +39,16 @@ import java.util.Locale
 class SosForegroundService : Service() {
     companion object {
         private const val TAG = "SosForegroundService"
-        private const val CHANNEL_ID = "aegixa_sos_foreground"
-        private const val CHANNEL_NAME = "Aegixa SOS Protection"
+        private const val CHANNEL_ID = "sailor_sos_foreground"
+        private const val CHANNEL_NAME = "Sailor SOS Protection"
         private const val NOTIFICATION_ID = 44021
         private const val RESTART_REQUEST_CODE = 44099
-        private const val ACTION_START = "com.example.aegixa.sos.START"
-        private const val ACTION_STOP = "com.example.aegixa.sos.STOP"
-        private const val ACTION_START_AUDIO = "com.example.aegixa.sos.START_AUDIO"
-        private const val ACTION_STOP_AUDIO = "com.example.aegixa.sos.STOP_AUDIO"
-        private const val ACTION_START_VIDEO = "com.example.aegixa.sos.START_VIDEO"
-        private const val ACTION_STOP_VIDEO = "com.example.aegixa.sos.STOP_VIDEO"
+        private const val ACTION_START = "com.example.sailor.sos.START"
+        private const val ACTION_STOP = "com.example.sailor.sos.STOP"
+        private const val ACTION_START_AUDIO = "com.example.sailor.sos.START_AUDIO"
+        private const val ACTION_STOP_AUDIO = "com.example.sailor.sos.STOP_AUDIO"
+        private const val ACTION_START_VIDEO = "com.example.sailor.sos.START_VIDEO"
+        private const val ACTION_STOP_VIDEO = "com.example.sailor.sos.STOP_VIDEO"
 
         // ── File-based cross-process state ──────────────────────────────
         // These files live in filesDir/sos_service_state/ and are readable
@@ -61,6 +61,10 @@ class SosForegroundService : Service() {
         private const val FILE_SHOULD_RECORD_VIDEO = "should_record_video"
         private const val FILE_LAST_AUDIO_PATH = "last_audio_path"
         private const val FILE_LAST_VIDEO_PATH = "last_video_path"
+        private const val FILE_ACTIVE_SESSION_ID = "active_session_id"
+        private const val FILE_TASK_REMOVED_SESSION_ID = "task_removed_session_id"
+        private const val FILE_TASK_REMOVED_AUDIO_PATH = "task_removed_audio_path"
+        private const val FILE_TASK_REMOVED_VIDEO_PATH = "task_removed_video_path"
 
         private fun stateDir(context: Context): File {
             val dir = File(context.filesDir, STATE_DIR)
@@ -117,6 +121,29 @@ class SosForegroundService : Service() {
 
         fun getLastVideoPath(context: Context): String? =
             readStateFile(context, FILE_LAST_VIDEO_PATH)
+
+        fun setActiveSessionId(context: Context, sessionId: String?) {
+            val trimmed = sessionId?.trim().orEmpty()
+            if (trimmed.isEmpty()) {
+                deleteStateFile(context, FILE_ACTIVE_SESSION_ID)
+                return
+            }
+            writeStateFile(context, FILE_ACTIVE_SESSION_ID, trimmed)
+        }
+
+        fun getTaskRemovedState(context: Context): Map<String, String?> {
+            return mapOf(
+                "sessionId" to readStateFile(context, FILE_TASK_REMOVED_SESSION_ID),
+                "audioPath" to readStateFile(context, FILE_TASK_REMOVED_AUDIO_PATH),
+                "videoPath" to readStateFile(context, FILE_TASK_REMOVED_VIDEO_PATH)
+            )
+        }
+
+        fun clearTaskRemovedState(context: Context) {
+            deleteStateFile(context, FILE_TASK_REMOVED_SESSION_ID)
+            deleteStateFile(context, FILE_TASK_REMOVED_AUDIO_PATH)
+            deleteStateFile(context, FILE_TASK_REMOVED_VIDEO_PATH)
+        }
 
         // ── Service control (called from APP process) ──────────────────
 
@@ -210,6 +237,7 @@ class SosForegroundService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var isAudioActive = false
     private var isVideoActive = false
+    private var stopBecauseTaskRemoved = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -263,17 +291,14 @@ class SosForegroundService : Service() {
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         Log.i(TAG, "App removed from recents.")
-        val active = readStateFile(applicationContext, FILE_SERVICE_ACTIVE) != null
-        if (active) {
-            // Schedule restart as safety net (mainly for aggressive OEMs)
-            scheduleRestart()
-        }
+        stopBecauseTaskRemoved = true
+        finalizeTaskRemovedStop()
         super.onTaskRemoved(rootIntent)
     }
 
     override fun onDestroy() {
         val active = readStateFile(applicationContext, FILE_SERVICE_ACTIVE) != null
-        if (active) {
+        if (active && !stopBecauseTaskRemoved) {
             Log.w(TAG, "Service destroyed while SOS active — scheduling restart.")
             scheduleRestart()
         }
@@ -362,7 +387,7 @@ class SosForegroundService : Service() {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
             wakeLock = pm.newWakeLock(
                 PowerManager.PARTIAL_WAKE_LOCK,
-                "aegixa:sos_recording"
+                "sailor:sos_recording"
             ).apply {
                 setReferenceCounted(false)
                 acquire(4 * 60 * 60 * 1000L)
@@ -647,6 +672,35 @@ class SosForegroundService : Service() {
         handleStopVideo()
     }
 
+    private fun finalizeTaskRemovedStop() {
+        val activeSessionId = readStateFile(applicationContext, FILE_ACTIVE_SESSION_ID)
+        stopAllRecordings()
+        val lastAudioPath = readStateFile(applicationContext, FILE_LAST_AUDIO_PATH)
+        val lastVideoPath = readStateFile(applicationContext, FILE_LAST_VIDEO_PATH)
+
+        clearTaskRemovedState(applicationContext)
+        if (!activeSessionId.isNullOrBlank()) {
+            writeStateFile(applicationContext, FILE_TASK_REMOVED_SESSION_ID, activeSessionId)
+        }
+        if (!lastAudioPath.isNullOrBlank()) {
+            writeStateFile(applicationContext, FILE_TASK_REMOVED_AUDIO_PATH, lastAudioPath)
+        }
+        if (!lastVideoPath.isNullOrBlank()) {
+            writeStateFile(applicationContext, FILE_TASK_REMOVED_VIDEO_PATH, lastVideoPath)
+        }
+
+        deleteStateFile(applicationContext, FILE_SERVICE_ACTIVE)
+        deleteStateFile(applicationContext, FILE_AUDIO_RECORDING)
+        deleteStateFile(applicationContext, FILE_VIDEO_RECORDING)
+        deleteStateFile(applicationContext, FILE_SHOULD_RECORD_AUDIO)
+        deleteStateFile(applicationContext, FILE_SHOULD_RECORD_VIDEO)
+        deleteStateFile(applicationContext, FILE_ACTIVE_SESSION_ID)
+        cancelPendingRestart(applicationContext)
+        releaseWakeLock()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
     private fun getRecordingsDir(subfolder: String): File {
         val dir = File(filesDir, "sos_recordings/$subfolder")
         if (!dir.exists()) dir.mkdirs()
@@ -715,7 +769,7 @@ class SosForegroundService : Service() {
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("SOS is active")
-            .setContentText("${statusParts.joinToString(" | ")} — Aegixa is protecting you")
+            .setContentText("${statusParts.joinToString(" | ")} — Sailor is protecting you")
             .setSmallIcon(R.mipmap.ic_launcher)
             .setOngoing(true)
             .setAutoCancel(false)
